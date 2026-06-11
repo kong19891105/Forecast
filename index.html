@@ -1,0 +1,1690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>预估收集工具 · 月度滚动预估</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --ink:#16243A; --ink2:#3B4A63; --mute:#7A879C;
+  --paper:#F4F6F9; --card:#FFFFFF; --line:#E3E8F0; --line2:#CBD4E1;
+  --blue:#2458E6; --blue-soft:#EEF4FF; --blue-line:#B9CDF5;
+  --green:#0E8A5F; --green-soft:#E9F6F0;
+  --red:#C2362B; --red-soft:#FBEDEB;
+  --amber:#A66A00; --amber-soft:#FBF3E2;
+  --navy-bar:#1C3257;
+  --shadow:0 1px 2px rgba(22,36,58,.06),0 4px 14px rgba(22,36,58,.07);
+  --r:10px;
+  --num:"Bahnschrift","Segoe UI",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:14px}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;background:var(--paper);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:inherit;color:var(--ink)}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+
+/* ---------- app bar ---------- */
+.appbar{background:var(--ink);color:#fff;display:flex;align-items:center;gap:18px;padding:0 20px;height:52px;position:sticky;top:0;z-index:50}
+.logo{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
+.logo b{font-size:16px;font-weight:700;letter-spacing:.04em}
+.logo span{font-size:11px;color:#9FB2D2}
+.tabs{display:flex;gap:4px;height:100%}
+.tab{background:none;border:none;color:#B9C6DC;font-size:14px;padding:0 16px;height:100%;border-bottom:3px solid transparent;transition:.15s}
+.tab:hover{color:#fff}
+.tab.on{color:#fff;border-bottom-color:#5B8DEF;font-weight:600}
+.bar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.sync-badge{font-size:11px;padding:3px 10px;border-radius:99px;background:rgba(255,255,255,.12);color:#CBD9F0;white-space:nowrap}
+.sync-badge.live{background:rgba(46,160,109,.25);color:#9FE6C6}
+.icon-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);color:#E3ECFA;border-radius:7px;padding:5px 12px;font-size:12px}
+.icon-btn:hover{background:rgba(255,255,255,.2)}
+
+/* ---------- 口径条 (signature context bar) ---------- */
+.ctxbar{background:var(--navy-bar);color:#D8E2F2;display:flex;align-items:center;gap:22px;padding:8px 20px;font-size:12px;position:sticky;top:52px;z-index:49;flex-wrap:wrap;min-height:42px}
+.ctx-cycle{font-weight:700;color:#fff;font-size:13px;white-space:nowrap}
+.mchips{display:flex;gap:5px;align-items:center}
+.mchip{width:30px;text-align:center;padding:2px 0;border-radius:5px;font-size:11px;font-family:var(--num);border:1px solid rgba(255,255,255,.28);color:#AFC2E0}
+.mchip.act{background:#E8EFFB;color:var(--ink);border-color:#E8EFFB;font-weight:700}
+.mchip.fc{border-style:dashed;color:#8FD0FF;border-color:#5B8DEF}
+.ctx-legend{color:#8FA3C6;white-space:nowrap}
+.ctx-kpis{margin-left:auto;display:flex;gap:20px;align-items:center}
+.ctx-kpi{display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}
+.ctx-kpi small{color:#8FA3C6;font-size:10px}
+.ctx-kpi b{font-family:var(--num);font-size:15px;color:#fff}
+.gauge{width:120px;height:8px;border-radius:99px;background:rgba(255,255,255,.15);overflow:hidden;position:relative}
+.gauge i{display:block;height:100%;background:linear-gradient(90deg,#5B8DEF,#2EA06D);border-radius:99px}
+
+/* ---------- layout ---------- */
+main{max-width:1480px;margin:0 auto;padding:18px 20px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:16px}
+.card-h{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.card-h h3{font-size:14px;font-weight:700}
+.card-h .hint{font-size:12px;color:var(--mute)}
+.card-b{padding:14px 16px}
+.empty{padding:46px 20px;text-align:center;color:var(--mute)}
+.empty b{display:block;font-size:16px;color:var(--ink2);margin-bottom:6px}
+
+/* ---------- controls ---------- */
+.btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:7px 14px;font-size:13px;color:var(--ink2);transition:.12s}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.btn.pri:hover{background:#1B47C4}
+.btn.danger{color:var(--red);border-color:#E8C2BD}
+.btn.danger:hover{background:var(--red-soft)}
+.btn.sm{padding:4px 10px;font-size:12px;border-radius:6px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+select.ctrl,input.ctrl{border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:13px;background:#fff}
+select.ctrl:focus,input.ctrl:focus{outline:2px solid var(--blue-line)}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.seg button{border:none;background:#fff;padding:6px 13px;font-size:12.5px;color:var(--ink2);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--ink);color:#fff;font-weight:600}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11.5px;color:var(--mute);font-weight:600}
+
+/* ---------- tables ---------- */
+.twrap{overflow:auto;max-height:72vh;border-radius:0 0 var(--r) var(--r)}
+table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;white-space:nowrap}
+.dt th{position:sticky;top:0;background:#F0F3F8;color:var(--ink2);font-weight:700;font-size:11.5px;padding:7px 9px;border-bottom:1px solid var(--line2);text-align:right;z-index:3}
+.dt th.l,.dt td.l{text-align:left}
+.dt td{padding:5px 9px;border-bottom:1px solid var(--line);text-align:right;background:#fff}
+.dt tr:hover td{background:#FAFBFE}
+.dt .stick1{position:sticky;left:0;z-index:2;border-right:1px solid var(--line)}
+.dt th.stick1{z-index:4}
+.dt .grp-row td{background:#F6F8FB;font-weight:700;color:var(--ink);border-top:1px solid var(--line2)}
+.dt .total-row td{background:#EDF1F7;font-weight:700;border-top:2px solid var(--line2);position:sticky;bottom:0;z-index:2}
+.dt td.act-cell{color:var(--ink2);background:#FAFAF8}
+.dt td.dim{color:var(--mute)}
+td.pos,.pos{color:var(--green)}
+td.neg,.neg{color:var(--red)}
+td.warn,.warn{color:var(--amber)}
+.fc-in{width:72px;border:1px solid var(--blue-line);background:var(--blue-soft);color:var(--blue);font-weight:600;font-family:var(--num);border-radius:6px;padding:4px 6px;text-align:right}
+.fc-in::placeholder{color:#9FB4DE;font-weight:400}
+.fc-in:focus{outline:2px solid var(--blue);background:#fff}
+.fc-in.filled{background:#fff}
+.rm-in{width:230px;border:1px solid var(--line2);border-radius:6px;padding:4px 8px;font-size:12px}
+.rm-in:focus{outline:2px solid var(--blue-line)}
+.subv{display:block;font-size:10px;color:var(--mute);font-family:var(--num);line-height:1.1;margin-top:1px}
+.tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:#EDF1F7;color:var(--ink2);margin-left:5px;vertical-align:1px}
+.tag.q{background:var(--amber-soft);color:var(--amber)}
+.tag.new{background:var(--green-soft);color:var(--green)}
+.delta-up::before{content:"▲";font-size:9px;margin-right:1px}
+.delta-dn::before{content:"▼";font-size:9px;margin-right:1px}
+
+/* ---------- multi-select dropdown ---------- */
+.ms-wrap{position:relative;display:inline-block;vertical-align:middle}
+.ms-trigger{border:1px solid var(--line2);border-radius:8px;padding:6px 10px;background:#fff;cursor:pointer;font-size:13px;min-width:110px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--ink2);user-select:none}
+.ms-trigger::after{content:"▼";font-size:9px;color:var(--mute)}
+.ms-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:30;background:#fff;border:1px solid var(--line2);border-radius:8px;box-shadow:var(--shadow);max-height:300px;overflow-y:auto;min-width:180px;display:none;padding:6px 0}
+.ms-wrap.open .ms-panel{display:block}
+.ms-panel label{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;color:var(--ink2)}
+.ms-panel label:hover{background:var(--blue-soft)}
+.ms-panel input[type=checkbox]{margin:0;width:14px;height:14px;accent-color:var(--blue)}
+.ms-panel .ms-all{border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:5px;font-weight:700}
+.ms-panel .ms-done{border-top:1px solid var(--line);padding-top:5px;margin-top:5px;background:var(--blue-soft);color:var(--blue);font-weight:600;justify-content:center}
+.ms-panel .ms-done:hover{background:var(--blue-line);color:#fff}
+
+/* ---------- resizable table ---------- */
+.dt th,.dt td{border-right:1px solid var(--line)}
+.dt th:last-child,.dt td:last-child{border-right:none}
+.resize-handle{position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize;z-index:5}
+.resize-handle:hover,.resize-handle.dragging{background:rgba(91,141,239,.5)}
+.dt th{position:relative}
+
+/* ---------- watermark ---------- */
+.watermark{position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden}
+.watermark span{position:absolute;display:block;font-size:14px;color:rgba(180,190,210,.18);font-weight:600;transform:rotate(-30deg);white-space:nowrap;user-select:none}
+
+/* ---------- fill page header stats ---------- */
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:14px 16px}
+.stat{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:linear-gradient(180deg,#fff,#FAFBFD)}
+.stat small{display:block;font-size:11px;color:var(--mute);margin-bottom:2px}
+.stat b{font-family:var(--num);font-size:19px}
+.stat .sub{font-size:11px;color:var(--mute);font-family:var(--num)}
+.savestate{font-size:12px;color:var(--mute)}
+.savestate.ok{color:var(--green)}
+
+/* dashboard chart */
+.chartbox{padding:10px 16px 4px}
+.legend{display:flex;gap:16px;font-size:11px;color:var(--mute);padding:0 16px 10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+
+/* remarks drawer rows */
+.rm-li{padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+.rm-li b{color:var(--ink2)}
+.rm-li .who{color:var(--mute);font-size:11.5px;margin-right:8px}
+
+/* admin */
+.admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:980px){.admin-grid{grid-template-columns:1fr}}
+.chip-toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:99px;padding:4px 12px;font-size:12px;margin:0 6px 6px 0;background:#fff;cursor:pointer;user-select:none}
+.chip-toggle.q{background:var(--amber-soft);border-color:#E5C788;color:var(--amber);font-weight:600}
+.vlist .vitem{display:flex;align-items:center;gap:14px;padding:10px 4px;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.vlist .vitem b{min-width:160px}
+.vlist .meta{color:var(--mute);font-size:12px}
+.note{font-size:12.5px;color:var(--ink2);background:var(--amber-soft);border:1px solid #EBD9AE;border-radius:8px;padding:10px 13px;margin-bottom:12px}
+.note.blue{background:var(--blue-soft);border-color:var(--blue-line)}
+.steps{font-size:13px;color:var(--ink2)}
+.steps li{margin:7px 0 7px 18px}
+.steps b{color:var(--ink)}
+kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding:0 5px;font-size:11px;font-family:var(--num)}
+
+/* modal */
+.mask{position:fixed;inset:0;background:rgba(15,24,40,.45);display:none;align-items:flex-start;justify-content:center;z-index:100;padding:6vh 16px}
+.mask.show{display:flex}
+.modal{background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(10,20,40,.35)}
+.modal-h{padding:15px 20px;border-bottom:1px solid var(--line);font-weight:700;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+.modal-b{padding:16px 20px}
+.modal-f{padding:13px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+.x{border:none;background:none;font-size:18px;color:var(--mute);cursor:pointer}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:5px 14px;font-size:13px;margin:8px 0}
+.kv span{color:var(--mute)}
+.mcheck{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.mcheck label{border:1px solid var(--line2);border-radius:7px;padding:5px 9px;font-size:12px;cursor:pointer;font-family:var(--num)}
+.mcheck label.on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:700}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 22px;border-radius:99px;font-size:13px;box-shadow:var(--shadow);z-index:200;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+@media print{.appbar,.ctxbar,.card-h .btn,.fc-toolbar{display:none}}
+</style>
+</head>
+<body>
+
+<div class="watermark" id="watermark"></div>
+
+<header class="appbar">
+  <div class="logo"><b>预估收集</b><span id="bu-tag">URO · 月度滚动</span></div>
+  <nav class="tabs">
+    <button class="tab on" data-tab="fill">✏️ 填写预估</button>
+    <button class="tab" data-tab="dash">📊 数据看板</button>
+    <button class="tab" data-tab="admin">⚙️ 管理后台</button>
+  </nav>
+  <div class="bar-right">
+    <button class="icon-btn" id="btn-me" title="切换身份 / 可见范围">👤 选择身份</button>
+    <span class="sync-badge" id="sync-badge">本地模式</span>
+    <button class="icon-btn" id="btn-refresh" title="重新读取共享数据">🔄 刷新</button>
+  </div>
+</header>
+
+<div class="ctxbar" id="ctxbar">
+  <span class="ctx-cycle" id="ctx-cycle">尚未导入数据</span>
+  <div class="mchips" id="ctx-months"></div>
+  <span class="ctx-legend">■ 已关账(Actual) &nbsp;⬚ 预估(Forecast)</span>
+  <div class="ctx-kpis" id="ctx-kpis"></div>
+</div>
+
+<main>
+  <!-- ============ 填写预估 ============ -->
+  <section id="tab-fill"></section>
+  <!-- ============ 数据看板 ============ -->
+  <section id="tab-dash" style="display:none"></section>
+  <!-- ============ 管理后台 ============ -->
+  <section id="tab-admin" style="display:none"></section>
+</main>
+
+<div class="mask" id="mask"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<input type="file" id="file-xlsx" accept=".xlsx,.xls,.csv" style="display:none">
+<input type="file" id="file-pkg" accept=".json" style="display:none">
+<input type="file" id="file-reps" accept=".json" multiple style="display:none">
+
+<script>
+/* =====================================================================
+   预估收集工具 — 单文件应用
+   双运行模式:
+   ① 作为 Claude Artifact 发布 → window.storage 共享存储,全员实时共用一份数据
+   ② 作为本地 HTML 文件   → 内存运行 + JSON 数据包/预估文件 离线接力
+   ===================================================================== */
+"use strict";
+const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = v => { if (v === null || v === undefined || v === "") return 0; const n = typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : 0; };
+const zeros = () => Array(12).fill(0);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+/* ---- 数字显示: 金额一律千元(K) ---- */
+function fmtK(v, d) { if (v === null || v === undefined || !isFinite(v)) return "–";
+  const k = v / 1000; const dd = d !== undefined ? d : (Math.abs(k) >= 100 ? 0 : 1);
+  return k.toLocaleString("zh-CN", { minimumFractionDigits: dd, maximumFractionDigits: dd }); }
+function fmtQ(v) { if (v === null || v === undefined || !isFinite(v)) return "–";
+  return v.toLocaleString("zh-CN", { maximumFractionDigits: 1 }); }
+function fmtPct(v) { return (v === null || !isFinite(v)) ? "–" : (v * 100).toFixed(1) + "%"; }
+function fmtPP(v)  { return (v === null || !isFinite(v)) ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "pp"; }
+function fmtDK(v)  { if (v === null || !isFinite(v)) return "–"; const s = fmtK(Math.abs(v)); return (v >= 0 ? "+" : "-") + s; }
+function clsSign(v, inv) { if (v === null || !isFinite(v) || Math.abs(v) < 1e-9) return ""; return (v > 0) !== !!inv ? "pos" : "neg"; }
+function clsAch(v) { if (v === null || !isFinite(v)) return ""; return v >= 1 ? "pos" : (v < 0.9 ? "neg" : "warn"); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
+
+/* =================== 存储适配层 =================== */
+const Store = {
+  shared: false,
+  mem: {},
+  async init() { try { if (window.storage && typeof window.storage.get === "function") { await window.storage.list("fc-", true); this.shared = true; } } catch (e) { this.shared = false; } },
+  async get(k) {
+    if (this.shared) { try { const r = await window.storage.get(k, true); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    return this.mem[k] !== undefined ? this.mem[k] : null;
+  },
+  async set(k, v) {
+    if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), true); return !!r; } catch (e) { console.error(e); toast("⚠ 共享存储写入失败"); return false; } }
+    this.mem[k] = JSON.parse(JSON.stringify(v)); return true;
+  },
+  async del(k) { if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} } else delete this.mem[k]; },
+  async list(prefix) {
+    if (this.shared) { try { const r = await window.storage.list(prefix, true); return (r && r.keys) ? r.keys.map(x => typeof x === "string" ? x : x.key) : []; } catch (e) { return []; } }
+    return Object.keys(this.mem).filter(k => k.startsWith(prefix));
+  },
+  /* 个人空间(shared=false): 每个使用者各自一份,用于记住身份 */
+  async pget(k) {
+    if (this.shared) { try { const r = await window.storage.get(k, false); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
+  },
+  async pset(k, v) {
+    if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), false); return !!r; } catch (e) { return false; } }
+    this.mem["p:" + k] = JSON.parse(JSON.stringify(v)); return true;
+  },
+  async pdel(k) { if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} } else delete this.mem["p:" + k]; }
+};
+
+/* =================== 全局状态 =================== */
+const S = {
+  cfg: null,
+  master: null,
+  idx: new Map(),
+  repInfo: new Map(),
+  fcs: new Map(),
+  verCache: new Map(),
+  curRep: "",
+  me: null,
+  gateOpen: false,
+  tab: "fill",
+  period: "FY",
+  dash: { dim: "grp", metric: "amt", cmp: "latest", rsm: "", q: "", months: false, open: new Set(), period: "FY", fProv: [], fGrp: [], fRep: [], fDsm: [] },
+  _dashClickHandler: null,
+  pendingImport: null
+};
+const rowKey = (rep, prov, grp) => rep + "|" + prov + "|" + grp;
+
+/* =================== 系统导出解析 (纯函数) =================== */
+function detectCols(headers) {
+  const H = headers.map(h => String(h ?? "").trim());
+  const find = (...cands) => { for (const c of cands) { const i = H.findIndex(h => h === c); if (i >= 0) return H[i]; } return null; };
+  const findInc = kw => { const i = H.findIndex(h => h.includes(kw)); return i >= 0 ? H[i] : null; };
+  // 自动识别年份: 同时存在 "XX Amt" 与 "XX Amt AOP" 的最大年份为当年
+  let cy = null; const yrs = [];
+  for (const h of H) { const m = h.match(/^(\d{2}) Amt$/); if (m && H.includes(m[1] + " Amt AOP")) yrs.push(parseInt(m[1])); }
+  if (yrs.length) cy = Math.max(...yrs);
+  if (cy === null) return { err: "未找到形如「26 Amt」与「26 Amt AOP」的列,请确认导出的是系统标准 detail 明细。" };
+  const ly = cy - 1;
+  const C = {
+    cy, ly,
+    rep: find("Rep", "rep", "代表", "销售代表"),
+    prov: find("Province", "省份", "省"),
+    grp: find("Region 0 - for 预估") || findInc("for 预估") || find("Prod Group", "Product Line5", "产品组"),
+    rsm: find("RSM", "Region", "大区"),
+    dsm: find("District", "DSM", "地区"),
+    bu: find("BU"),
+    month: find("Month", "month", "月份"),
+    aopA: cy + " Amt AOP", aopQ: cy + " Qty AOP",
+    actA: cy + " Amt",     actQ: cy + " Qty",
+    lyA: find(ly + " Amt"), lyQ: find(ly + " Qty")
+  };
+  for (const need of ["rep", "prov", "grp", "month"]) if (!C[need]) return { err: "缺少必需列: " + need + " (Rep / Province / Region 0 - for 预估 / Month)" };
+  return C;
+}
+
+function aggregateRows(rows, C) {
+  const map = new Map(); const mAct = zeros(); const mAop = zeros(); let used = 0; let bu = "";
+  for (const r of rows) {
+    const m = parseInt(r[C.month]); if (!(m >= 1 && m <= 12)) continue;
+    used++;
+    const rep = String(r[C.rep] ?? "").trim() || "未分配";
+    const prov = String(r[C.prov] ?? "").trim() || "未知";
+    const grp = String(r[C.grp] ?? "").trim() || "未分组";
+    if (!bu && C.bu && r[C.bu]) bu = String(r[C.bu]).trim();
+    const key = rowKey(rep, prov, grp);
+    let o = map.get(key);
+    if (!o) { o = { rep, prov, grp, rsm: String(r[C.rsm] ?? "").trim(), dsm: String(r[C.dsm] ?? "").trim(), aopA: zeros(), aopQ: zeros(), actA: zeros(), actQ: zeros(), lyA: zeros(), lyQ: zeros() }; map.set(key, o); }
+    const i = m - 1;
+    o.aopA[i] += num(r[C.aopA]); o.aopQ[i] += num(r[C.aopQ]);
+    o.actA[i] += num(r[C.actA]); o.actQ[i] += num(r[C.actQ]);
+    if (C.lyA) o.lyA[i] += num(r[C.lyA]); if (C.lyQ) o.lyQ[i] += num(r[C.lyQ]);
+    mAct[i] += num(r[C.actA]); mAop[i] += num(r[C.aopA]);
+  }
+  // 已关账月份建议: 实际 ≥ 当月AOP的20% 视为完整月
+  const sugg = []; for (let i = 0; i < 12; i++) if (mAct[i] > 0 && (mAop[i] <= 0 || mAct[i] >= 0.2 * mAop[i])) sugg.push(i + 1);
+  return { rows: [...map.values()], used, suggested: sugg, mAct, mAop, bu };
+}
+
+/* =================== 数据装载 =================== */
+async function loadAll() {
+  S.cfg = await Store.get("fc-cfg");
+  S.master = await Store.get("fc-master");
+  S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
+  if (S.master) for (const r of S.master.rows) {
+    S.idx.set(rowKey(r.rep, r.prov, r.grp), r);
+    if (!S.repInfo.has(r.rep)) S.repInfo.set(r.rep, { rsm: r.rsm, dsm: r.dsm });
+  }
+  const fk = await Store.list("fc-f-");
+  for (const k of fk) { const d = await Store.get(k); if (d && d.rep) S.fcs.set(d.rep, d); }
+}
+async function getVersion(id) {
+  if (!id) return null;
+  if (S.verCache.has(id)) return S.verCache.get(id);
+  const v = await Store.get("fc-v-" + id); if (v) S.verCache.set(id, v);
+  return v;
+}
+function latestVerMeta() { const vs = (S.cfg && S.cfg.versions) || []; return vs.length ? vs[vs.length - 1] : null; }
+
+/* =================== 计算核心 =================== */
+function rowASP(r) {
+  const ov = S.cfg && S.cfg.aspOverride ? num(S.cfg.aspOverride[r.grp]) : 0;
+  if (ov > 0) return ov;
+  const aA = r.aopA.reduce((a, b) => a + b, 0), aQ = r.aopQ.reduce((a, b) => a + b, 0);
+  if (aQ > 0) return aA / aQ;
+  const lA = r.lyA.reduce((a, b) => a + b, 0), lQ = r.lyQ.reduce((a, b) => a + b, 0);
+  if (lQ > 0) return lA / lQ;
+  const cA = r.actA.reduce((a, b) => a + b, 0), cQ = r.actQ.reduce((a, b) => a + b, 0);
+  if (cQ > 0) return cA / cQ;
+  return 0;
+}
+/* =================== 期间工具函数 =================== */
+const PERIODS = [
+  { key: "Q1", label: "Q1", months: [0, 1, 2] },
+  { key: "Q2", label: "Q2", months: [3, 4, 5] },
+  { key: "Q3", label: "Q3", months: [6, 7, 8] },
+  { key: "Q4", label: "Q4", months: [9, 10, 11] },
+  { key: "H1", label: "H1", months: [0, 1, 2, 3, 4, 5] },
+  { key: "H2", label: "H2", months: [6, 7, 8, 9, 10, 11] },
+  { key: "FY", label: "FY（全年）", months: [0,1,2,3,4,5,6,7,8,9,10,11] }
+];
+function getPeriodMonths(p) { const d = PERIODS.find(x => x.key === p); return d ? d.months : PERIODS[6].months; }
+function periodLabel(p) { const d = PERIODS.find(x => x.key === p); return d ? d.label : p; }
+function calcEntryPeriod(e, p) {
+  const ms = getPeriodMonths(p);
+  let fy = 0, fyq = 0, aop = 0, aopQ = 0, ly = 0, lyQ = 0, openTotal = 0, openFilled = 0;
+  for (const i of ms) {
+    fy += e.m[i].a; fyq += e.m[i].q;
+    aop += (e.row ? e.row.aopA[i] : 0); aopQ += (e.row ? e.row.aopQ[i] : 0);
+    ly += (e.row ? e.row.lyA[i] : 0); lyQ += (e.row ? e.row.lyQ[i] : 0);
+    if (!e.m[i].act) { openTotal++; if (e.m[i].raw != null || e.m[i].rawq != null) openFilled++; }
+  }
+  return { fy, fyq, aop, aopQ, ly, lyQ, openTotal, openFilled };
+}
+function calcEntriesPeriod(entries, p) {
+  let fy = 0, fyq = 0, aop = 0, aopQ = 0, ly = 0, lyQ = 0, ytdAct = 0, ytdAop = 0, openTotal = 0, openFilled = 0;
+  const actSet = new Set(S.cfg.actMonths || []);
+  const ms = getPeriodMonths(p);
+  for (const e of entries) {
+    const pe = calcEntryPeriod(e, p);
+    fy += pe.fy; fyq += pe.fyq; aop += pe.aop; aopQ += pe.aopQ; ly += pe.ly; lyQ += pe.lyQ;
+    openTotal += pe.openTotal; openFilled += pe.openFilled;
+  }
+  for (const i of ms) {
+    if (actSet.has(i + 1)) for (const e of entries) { ytdAct += e.m[i].a; ytdAop += (e.row ? e.row.aopA[i] : 0); }
+  }
+  return { fy, fyq, aop, aopQ, ly, lyQ, ytdAct, ytdAop, openTotal, openFilled };
+}
+function periodSegHTML(id, cur) {
+  return '<div class="seg" id="' + id + '">' +
+    PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (cur === p.key ? "on" : "") + '">' + p.key + '</button>').join("") + '</div>';
+}
+function periodColHeaders(p, cfg, hasVer) {
+  const s = periodLabel(p);
+  const ly = cfg ? cfg.ly : "25";
+  let h = '<th class="l" style="min-width:240px">备注(预估说明/变化原因)</th>';
+  h += '<th>' + p + '预估</th><th>' + p + ' AOP</th><th>' + p + ' Ach%</th>';
+  h += '<th>' + ly + p + '</th><th>' + p + ' GR%</th>';
+  if (hasVer) h += '<th>上版' + p + '</th><th>Δ' + p + '</th><th>ΔAch</th>';
+  return h;
+}
+
+/* 把"主数据 + 各代表填写"合成统一条目列表 */
+function buildEntries() {
+  if (!S.master || !S.cfg) return [];
+  const actSet = new Set(S.cfg.actMonths || []);
+  const qtySet = new Set(S.cfg.qtyGroups || []);
+  const out = [];
+  const seen = new Set();
+  const mk = (r, f, manual) => {
+    const asp = rowASP(r);
+    const qm = qtySet.has(r.grp);
+    const m = []; let fy = 0, fyq = 0, openTotal = 0, openFilled = 0;
+    for (let i = 0; i < 12; i++) {
+      if (actSet.has(i + 1)) { const v = r.actA[i]; m.push({ act: true, a: v, q: r.actQ[i] }); fy += v; fyq += r.actQ[i]; }
+      else {
+        openTotal++;
+        const fa = f && f.a ? f.a[i] : null; const fq = f && f.q ? f.q[i] : null;
+        let a, q;
+        if (qm && fq != null) { q = fq; a = asp > 0 ? fq * asp : (fa != null ? fa : fq * 1000); }
+        else { a = fa != null ? fa : 0; q = fq != null ? fq : (fa != null && asp > 0 ? fa / asp : 0); }
+        if (fa != null || fq != null) openFilled++;
+        m.push({ act: false, a, q, raw: fa, rawq: fq });
+        fy += a; fyq += q;
+      }
+    }
+    const aop = r.aopA.reduce((x, y) => x + y, 0), aopQ = r.aopQ.reduce((x, y) => x + y, 0);
+    const ly = r.lyA.reduce((x, y) => x + y, 0), lyQ = r.lyQ.reduce((x, y) => x + y, 0);
+    out.push({ key: rowKey(r.rep, r.prov, r.grp), rep: r.rep, prov: r.prov, grp: r.grp,
+      rsm: r.rsm || (S.repInfo.get(r.rep) || {}).rsm || "未分配", dsm: r.dsm || (S.repInfo.get(r.rep) || {}).dsm || "未分配",
+      qtyMode: qtySet.has(r.grp), asp, m, fy, fyq, aop, aopQ, ly, lyQ,
+      ytdAct: r.actA.reduce((s, v, i) => actSet.has(i + 1) ? s + v : s, 0),
+      ytdAop: r.aopA.reduce((s, v, i) => actSet.has(i + 1) ? s + v : s, 0),
+      openTotal, openFilled, rm: (f && f.rm) || "", manual: !!manual, row: r, f });
+  };
+  for (const r of S.idx.values()) {
+    const k = rowKey(r.rep, r.prov, r.grp); seen.add(k);
+    const doc = S.fcs.get(r.rep); mk(r, doc && doc.rows ? doc.rows[k] : null, false);
+  }
+  for (const doc of S.fcs.values()) for (const k in (doc.rows || {})) {
+    const f = doc.rows[k];
+    if (f && f.manual && !seen.has(k)) {
+      const [rep, prov, grp] = k.split("|");
+      mk({ rep, prov, grp, rsm: "", dsm: "", aopA: zeros(), aopQ: zeros(), actA: zeros(), actQ: zeros(), lyA: zeros(), lyQ: zeros() }, f, true);
+    }
+  }
+  return out;
+}
+const dimDefs = {
+  grp:  { name: "产品维度", f: e => e.grp },
+  prov: { name: "省份维度", f: e => e.prov },
+  rep:  { name: "代表维度", f: e => e.rep },
+  dsm:  { name: "地区(DSM)", f: e => e.dsm },
+  rsm:  { name: "大区(RSM)", f: e => e.rsm }
+};
+const GRP_ORDER = [
+  "一次性光纤","复用光纤","其他光纤","P30及其他设备",
+  "支架-NVBP省份","支架","导丝","网篮","鞘","封堵器",
+  "Stone Others","妇女健康","AMS 700","AMS 800",
+  "Rezum设备","Rezum器械","SpaceOAR"
+];
+function grpSortKey(g) {
+  const i = GRP_ORDER.indexOf(g);
+  return i >= 0 ? String(i).padStart(3, "0") : "999" + g;
+}
+/* =================== 身份与可见范围 =================== */
+function nameLists() {
+  const rows = [...S.idx.values()];
+  const u = f => [...new Set(rows.map(f).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
+  return { reps: u(r => r.rep), dsms: u(r => r.dsm), rsms: u(r => r.rsm) };
+}
+function inScope(e) {
+  const m = S.me; if (!m || m.role === "admin") return true;
+  if (m.role === "rep") return e.rep === m.name;
+  if (m.role === "dsm") return e.dsm === m.name;
+  if (m.role === "rsm") return (S.cfg && S.cfg.rsmScope === "own") ? e.rsm === m.name : true;
+  return true;
+}
+function scopedEntries() { return buildEntries().filter(inScope); }
+function scopeReps() {
+  const all = [...new Set([...S.idx.values()].map(r => r.rep))];
+  const m = S.me; let list;
+  if (!m || m.role === "admin") list = all;
+  else if (m.role === "rep") list = all.includes(m.name) ? [m.name] : [];
+  else if (m.role === "dsm") list = all.filter(r => (S.repInfo.get(r) || {}).dsm === m.name);
+  else list = (S.cfg && S.cfg.rsmScope === "own") ? all.filter(r => (S.repInfo.get(r) || {}).rsm === m.name) : all;
+  return list.sort((a, b) => a.localeCompare(b, "zh"));
+}
+function scopeLabel() {
+  const m = S.me; if (!m) return "";
+  return m.role === "admin" ? "管理员 · 全部数据"
+    : m.role === "rep" ? "代表 · " + m.name
+    : m.role === "dsm" ? "DSM · " + m.name + " 团队"
+    : "RSM · " + m.name + ((S.cfg && S.cfg.rsmScope === "own") ? "(本大区)" : "(全部)");
+}
+function rollup(entries, dimF) {
+  const m = new Map();
+  for (const e of entries) {
+    const k = dimF(e) || "未分配";
+    let o = m.get(k);
+    if (!o) { o = { dim: k, fy: 0, fyq: 0, aop: 0, aopQ: 0, ly: 0, lyQ: 0, ytdAct: 0, ytdAop: 0, m: zeros(), mq: zeros(), aopA: zeros(), aopQ2: zeros(), lyA: zeros(), lyQ2: zeros(), openTotal: 0, openFilled: 0, rms: [], items: [] }; m.set(k, o); }
+    o.fy += e.fy; o.fyq += e.fyq; o.aop += e.aop; o.aopQ += e.aopQ; o.ly += e.ly; o.lyQ += e.lyQ;
+    o.ytdAct += e.ytdAct; o.ytdAop += e.ytdAop; o.openTotal += e.openTotal; o.openFilled += e.openFilled;
+    for (let i = 0; i < 12; i++) { o.m[i] += e.m[i].a; o.mq[i] += e.m[i].q; if (e.row) { o.aopA[i] += e.row.aopA[i]; o.aopQ2[i] += e.row.aopQ[i]; o.lyA[i] += e.row.lyA[i]; o.lyQ2[i] += e.row.lyQ[i]; } }
+    if (e.rm) o.rms.push(e);
+    o.items.push(e);
+  }
+  return [...m.values()].sort((a, b) => b.aop - a.aop || b.fy - a.fy);
+}
+/* 历史版本快照按同维度汇总 */
+function rollupVer(ver, dimKey, filterRsm) {
+  const m = new Map(); if (!ver) return m;
+  for (const k in ver.rows) {
+    const v = ver.rows[k];
+    if (filterRsm && (v.rsm || "") !== filterRsm) continue;
+    const dk = dimKey === "grp" ? v.grp : dimKey === "prov" ? v.prov : dimKey === "rep" ? v.rep : dimKey === "dsm" ? (v.dsm || "未分配") : (v.rsm || "未分配");
+    let o = m.get(dk); if (!o) { o = { fy: 0, fyq: 0, aop: 0, ly: 0 }; m.set(dk, o); }
+    o.fy += v.fy; o.fyq += v.fyq || 0; o.aop += v.aop; o.ly += v.ly;
+  }
+  return m;
+}
+function verRowOf(ver, key) { return ver && ver.rows ? ver.rows[key] : null; }
+
+/* =================== 保存代表填写 =================== */
+const saveRepDoc = debounce(async rep => {
+  const doc = S.fcs.get(rep); if (!doc) return;
+  doc.updatedAt = Date.now();
+  const ok = await Store.set("fc-f-" + rep, doc);
+  const el = $("#savestate");
+  if (el) { el.textContent = ok ? "✓ 已保存 " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "⚠ 保存失败"; el.className = "savestate" + (ok ? " ok" : ""); }
+}, 700);
+function ensureDoc(rep) {
+  let d = S.fcs.get(rep);
+  if (!d) { d = { rep, updatedAt: Date.now(), overall: "", rows: {} }; S.fcs.set(rep, d); }
+  if (!d.rows) d.rows = {};
+  return d;
+}
+function ensureCell(rep, key) {
+  const d = ensureDoc(rep);
+  if (!d.rows[key]) d.rows[key] = { a: Array(12).fill(null), q: Array(12).fill(null), rm: "" };
+  const c = d.rows[key];
+  if (!c.a) c.a = Array(12).fill(null); if (!c.q) c.q = Array(12).fill(null);
+  return c;
+}
+
+/* =================== 口径条 =================== */
+function renderCtx() {
+  const cyc = $("#ctx-cycle"), mc = $("#ctx-months"), kp = $("#ctx-kpis");
+  if (!S.cfg || !S.master) { cyc.textContent = "尚未导入数据 — 请到「管理后台」导入系统导出文件"; mc.innerHTML = ""; kp.innerHTML = ""; return; }
+  cyc.textContent = S.cfg.cycleLabel + " · FY" + S.cfg.cy + (S.me && S.me.role !== "admin" ? " · " + scopeLabel() : "");
+  const actSet = new Set(S.cfg.actMonths);
+  mc.innerHTML = MN.map((n, i) => '<span class="mchip ' + (actSet.has(i + 1) ? "act" : "fc") + '">' + (i + 1) + "</span>").join("");
+  const es = scopedEntries();
+  const pe = calcEntriesPeriod(es, S.period);
+  const ach = pe.aop > 0 ? pe.fy / pe.aop : null;
+  const gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
+  const ytdAch = pe.ytdAop > 0 ? pe.ytdAct / pe.ytdAop : null;
+  const oT = pe.openTotal, oF = pe.openFilled;
+  const pLabel = periodLabel(S.period);
+  kp.innerHTML =
+    '<div class="ctx-kpi"><small>YTD达成</small><b class="num">' + fmtPct(ytdAch) + "</b></div>" +
+    '<div class="ctx-kpi"><small>' + pLabel + '预估达成</small><b class="num">' + fmtPct(ach) + "</b></div>" +
+    '<div class="ctx-kpi"><small>' + pLabel + ' GR% vs FY' + S.cfg.ly + "</small><b class=\"num\">" + fmtPct(gr) + "</b></div>" +
+    '<div class="ctx-kpi"><small>填写进度 ' + Math.round(oT ? oF / oT * 100 : 0) + '%</small><div class="gauge"><i style="width:' + Math.min(100, oT ? oF / oT * 100 : 0) + '%"></i></div></div>';
+}
+
+/* =====================================================================
+   ① 填写预估页
+   ===================================================================== */
+async function renderFill() {
+  const host = $("#tab-fill");
+  if (!S.master || !S.cfg) {
+    host.innerHTML = '<div class="card"><div class="empty"><b>还没有底表数据</b>管理员请先到「管理后台」导入系统导出的 AOP/Actual 明细文件,导入后各代表即可在此填写。</div></div>';
+    return;
+  }
+  /* 保存滚动位置 */
+  const twrapEl = $(".twrap");
+  const savedScrollLeft = twrapEl ? twrapEl.scrollLeft : 0;
+  
+  const reps = scopeReps();
+  const lockRep = S.me && S.me.role === "rep";
+  if (lockRep) S.curRep = S.me.name;
+  else if (S.curRep && !reps.includes(S.curRep)) S.curRep = "";
+  const lv = latestVerMeta();
+  const ver = lv ? await getVersion(lv.id) : null;
+  const actSet = new Set(S.cfg.actMonths);
+
+  let html = '<div class="card"><div class="card-h">';
+  if (lockRep) {
+    html += "<h3>" + esc(S.curRep) + " 的预估填写</h3>" +
+      '<span class="hint">身份:销售代表 — 只显示并保存你自己的数据,与其他同事互不影响</span>';
+  } else {
+    html += '<h3>选择代表岗位</h3>' +
+      '<select class="ctrl" id="rep-sel" style="min-width:220px"><option value="">— 请选择代表 / 岗位 —</option>' +
+      reps.map(r => { const inf = S.repInfo.get(r) || {}; return '<option value="' + esc(r) + '"' + (r === S.curRep ? " selected" : "") + ">" + esc(r) + (inf.dsm ? " · " + esc(inf.dsm) : "") + "</option>"; }).join("") +
+      "</select>" +
+      '<span class="hint">' + (S.me && S.me.role !== "admin" ? "范围:" + scopeLabel() + " · 可代填空缺岗位(岗位号)" : "系统中岗位换人/显示岗位号时,这里会自动跟随系统导出更新,无需手工改名。") + "</span>";
+  }
+  html += '<span class="savestate" id="savestate" style="margin-left:auto"></span>' +
+    "</div>";
+
+  if (!S.curRep) {
+    html += '<div class="empty"><b>请先在上方选择姓名(岗位)</b>选中后只会显示并保存该代表的填写,与其他同事互不影响。</div></div>';
+    host.innerHTML = html;
+    if ($("#rep-sel")) $("#rep-sel").onchange = e => { S.curRep = e.target.value; renderFill(); };
+    return;
+  }
+  html += "</div>";
+
+  const all = buildEntries().filter(e => e.rep === S.curRep);
+  all.sort((a, b) => a.grp.localeCompare(b.grp, "zh") || b.aop - a.aop);
+  const byGrp = new Map();
+  for (const e of all) { if (!byGrp.has(e.grp)) byGrp.set(e.grp, []); byGrp.get(e.grp).push(e); }
+  const doc = S.fcs.get(S.curRep);
+
+  /* —— 个人统计卡 —— */
+  html += '<div class="card"><div class="statgrid" id="rep-stats"></div>' +
+    '<div class="card-b fc-toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">' +
+    '<span class="hint" style="margin-right:4px">快捷填充(仅填空白预估格):</span>' +
+    '<button class="btn sm" id="qf-aop">按 AOP 指标</button>' +
+    '<button class="btn sm" id="qf-ly">按去年同期</button>' +
+    (ver ? '<button class="btn sm" id="qf-prev">复制上次版本</button>' : "") +
+    '<button class="btn sm danger" id="qf-clear">清空我的全部预估</button>' +
+    '<span style="flex:1"></span>' +
+    '<button class="btn sm" id="add-row">＋ 新增产品/省份行</button>' +
+    (!Store.shared ? '<button class="btn sm pri" id="exp-rep">⬇ 导出我的预估文件</button>' : "") +
+    "</div></div>";
+
+  /* —— 月度趋势图(随输入实时更新) —— */
+  html += '<div class="card"><div class="card-h"><h3>📈 月度趋势 · ' + esc(S.curRep) + '</h3>' +
+    '<span class="hint">深色柱 = 已关账实际 · 斜纹柱 = 预估(随下方输入实时变化) · 红线 = AOP · 虚线 = 去年同期</span></div>' +
+    '<div id="fill-chart" style="padding:4px 10px 2px"></div></div>';
+
+  /* —— 填写表 —— */
+  const pLabel = periodLabel(S.period);
+  const pShort = S.period === "FY" ? "FY" : S.period;
+  html += '<div class="card"><div class="card-h"><h3>' + esc(S.curRep) + ' 的预估明细</h3>' +
+    '<div class="seg" id="period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (S.period === p.key ? "on" : "") + '">' + p.label + '</button>').join('') + '</div>' +
+    '<span class="hint">蓝色格可编辑(其余为系统数据,不可改) · 金额单位:千元 K · 灰底为已关账实际 · 输入框灰字为上次版本值</span></div>' +
+    '<div class="twrap"><table class="dt"><thead><tr>' +
+    '<th class="l stick1" style="min-width:200px">产品 / 省份</th>';
+  for (let i = 0; i < 12; i++) html += '<th>' + MN[i] + (actSet.has(i + 1) ? "<br><span style='font-weight:400'>Act</span>" : "<br><span style='color:var(--blue)'>预估</span>") + "</th>";
+  html += '<th class="l" style="min-width:240px">备注(预估说明/变化原因)</th>' +
+    '<th>' + pShort + '预估</th><th>' + pShort + ' AOP</th><th>' + pShort + ' Ach%</th><th>' + S.cfg.ly + pShort + '</th><th>' + pShort + ' GR%</th>' +
+    (ver ? '<th>上版' + pShort + '</th><th>Δ' + pShort + '</th><th>ΔAch</th>' : '') +
+    '</tr></thead><tbody id="fill-body">';
+
+  let ri = 0;
+  const sortedGrps = [...byGrp.keys()].sort((a, b) => grpSortKey(a).localeCompare(grpSortKey(b)));
+  for (const grp of sortedGrps) {
+    const list = byGrp.get(grp);
+    const qm = list[0].qtyMode;
+    const gsubId = 'gsub-' + esc(grp).replace(/[^\w\u4e00-\u9fa5]/g, "_");
+    html += '<tr class="grp-row"><td class="l stick1">' + esc(grp) + (qm ? '<span class="tag q">填数量</span>' : '<span class="tag">填金额K</span>') + '</td>' +
+      '<td colspan="' + (12 + 5 + (ver ? 3 : 0) + 1) + '" class="l" id="' + gsubId + '"></td></tr>';
+    for (const e of list) {
+      e._ri = ri;
+      const vrow = verRowOf(ver, e.key);
+      const pe = calcEntryPeriod(e, S.period);
+      html += '<tr data-key="' + esc(e.key) + '"><td class="l stick1" style="padding-left:20px">' + esc(e.prov) + (e.manual ? '<span class="tag new">新增</span>' : "") + "</td>";
+      for (let i = 0; i < 12; i++) {
+        const c = e.m[i];
+        if (c.act) html += '<td class="act-cell num">' + fmtK(c.a) + (e.qtyMode ? '<span class="subv">' + fmtQ(c.q) + "件</span>" : "") + "</td>";
+        else {
+          const prevA = vrow && vrow.m ? vrow.m[i] : null;
+          if (e.qtyMode) {
+            const val = c.rawq != null ? String(+c.rawq.toFixed(2)) : (c.raw != null && e.asp > 0 ? String(+(c.raw / e.asp).toFixed(2)) : "");
+            const ph = prevA != null && e.asp > 0 ? "上版" + (+(prevA / e.asp).toFixed(1)) : "数量";
+            html += '<td><input class="fc-in' + (val ? " filled" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="q" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
+              '<span class="subv" id="amt-' + ri + "-" + i + '">' + (c.raw != null ? "≈" + fmtK(c.a) + "K" : "") + "</span></td>";
+          } else {
+            const val = c.raw != null ? String(+(c.raw / 1000).toFixed(2)) : "";
+            const ph = prevA != null ? "上版" + fmtK(prevA) : "K";
+            html += '<td><input class="fc-in' + (val ? " filled" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="a" value="' + val + '" placeholder="' + ph + '" inputmode="decimal"></td>';
+          }
+        }
+      }
+      /* 备注 → 12月后、FY预估前 */
+      html += '<td class="l"><input class="rm-in" data-ri="' + ri + '" data-kind="rm" value="' + esc(e.rm) + '" placeholder="例: 6月手术量恢复,上调"></td>';
+      /* 期间动态列 */
+      html += '<td class="num" id="fy-' + ri + '"></td><td class="num" id="aop-' + ri + '"></td><td class="num" id="ach-' + ri + '"></td>' +
+        '<td class="num" id="ly-' + ri + '"></td><td class="num" id="gr-' + ri + '"></td>';
+      if (ver) html += '<td class="num" id="vfy-' + ri + '"></td><td class="num" id="dfy-' + ri + '"></td><td class="num" id="dach-' + ri + '"></td>';
+      html += '</tr>';
+      ri++;
+    }
+  }
+  html += '</tbody><tfoot><tr class="total-row" id="fill-total"></tr></tfoot></table></div></div>';
+
+  /* —— 整体备注 —— */
+  html += '<div class="card"><div class="card-h"><h3>本次预估整体说明(可选)</h3></div><div class="card-b">' +
+    '<textarea id="overall" class="ctrl" style="width:100%;min-height:64px" placeholder="给经理/老板看的整体说明,例如:本月集采落地,导丝价格下调,Q3量增价减…">' + esc((doc && doc.overall) || "") + "</textarea></div></div>";
+
+  host.innerHTML = html;
+  const entries = all; // closure
+  S._fillEntries = entries; S._fillVer = ver;
+
+  /* —— 事件 —— */
+  if ($("#rep-sel")) $("#rep-sel").onchange = e => { S.curRep = e.target.value; renderFill(); };
+  if ($("#period-seg")) $("#period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { S.period = b.dataset.p; renderFill(); renderCtx(); } };
+  $("#overall").oninput = e => { ensureDoc(S.curRep).overall = e.target.value; saveRepDoc(S.curRep); };
+  $("#fill-body").addEventListener("input", e => {
+    const t = e.target; if (!t.dataset || t.dataset.ri === undefined) return;
+    const en = entries[+t.dataset.ri];
+    if (t.dataset.kind === "rm") { ensureCell(S.curRep, en.key).rm = t.value; en.rm = t.value; saveRepDoc(S.curRep); return; }
+    const i = +t.dataset.m;
+    const cell = ensureCell(S.curRep, en.key);
+    const raw = t.value.trim();
+    if (raw === "" || isNaN(parseFloat(raw))) { cell.a[i] = null; cell.q[i] = null; t.classList.remove("filled"); }
+    else {
+      const v = parseFloat(raw);
+      if (t.dataset.kind === "q") { cell.q[i] = v; cell.a[i] = en.asp > 0 ? v * en.asp : v * 1000; }
+      else { cell.a[i] = v * 1000; cell.q[i] = en.asp > 0 ? cell.a[i] / en.asp : null; }
+      t.classList.add("filled");
+    }
+    recalcEntry(en);
+    if (t.dataset.kind === "q") { const lab = $("#amt-" + t.dataset.ri + "-" + i); if (lab) lab.textContent = cell.a[i] != null ? "≈" + fmtK(cell.a[i]) + "K" : ""; }
+    paintEntry(en); paintRepStats(entries, ver); paintGroupSubs(entries, ver); paintFillChart(entries); renderCtx();
+    saveRepDoc(S.curRep);
+  });
+  $("#qf-aop") && ($("#qf-aop").onclick = () => quickFill("aop"));
+  $("#qf-ly") && ($("#qf-ly").onclick = () => quickFill("ly"));
+  $("#qf-prev") && ($("#qf-prev").onclick = () => quickFill("prev"));
+  $("#qf-clear").onclick = () => {
+    openModal("清空确认", "<p>确定清空 <b>" + esc(S.curRep) + "</b> 在所有<b>预估月份</b>的填写吗?已关账月份的实际数不受影响。</p>",
+      '<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="qfc-ok">清空</button>');
+    $("#qfc-ok").onclick = () => { closeModal(); quickFill("clear"); };
+  };
+  $("#add-row").onclick = openAddRow;
+  $("#exp-rep") && ($("#exp-rep").onclick = exportRepFile);
+
+  for (const e of entries) recalcEntry(e), paintEntry(e);
+  paintRepStats(entries, ver); paintGroupSubs(entries, ver); paintFillChart(entries);
+  
+  /* 恢复滚动位置 */
+  const newTwrap = $(".twrap");
+  if (newTwrap) newTwrap.scrollLeft = savedScrollLeft;
+}
+
+/* 填写页月度趋势: 当前代表的 实际+预估 vs AOP vs 去年 */
+function paintFillChart(entries) {
+  const el = $("#fill-chart"); if (!el) return;
+  const blend = zeros(), aopM = zeros(), lyM = zeros();
+  for (const e of entries) for (let i = 0; i < 12; i++) {
+    blend[i] += e.m[i].a;
+    if (e.row) { aopM[i] += e.row.aopA[i]; lyM[i] += e.row.lyA[i]; }
+  }
+  el.innerHTML = monthChart(blend, aopM, lyM);
+}
+
+function recalcEntry(e) {
+  const actSet = new Set(S.cfg.actMonths);
+  const f = (S.fcs.get(e.rep) || { rows: {} }).rows[e.key];
+  let fy = 0, fyq = 0, openFilled = 0;
+  for (let i = 0; i < 12; i++) {
+    if (actSet.has(i + 1)) { e.m[i] = { act: true, a: e.row.actA[i], q: e.row.actQ[i] }; fy += e.row.actA[i]; fyq += e.row.actQ[i]; }
+    else {
+      const fa = f && f.a ? f.a[i] : null, fq = f && f.q ? f.q[i] : null;
+      let a, q;
+      if (e.qtyMode && fq != null) { q = fq; a = e.asp > 0 ? fq * e.asp : (fa != null ? fa : fq * 1000); }
+      else { a = fa != null ? fa : 0; q = fq != null ? fq : (fa != null && e.asp > 0 ? fa / e.asp : 0); }
+      if (fa != null || fq != null) openFilled++;
+      e.m[i] = { act: false, a, q, raw: fa, rawq: fq }; fy += a; fyq += q;
+    }
+  }
+  e.fy = fy; e.fyq = fyq; e.openFilled = openFilled;
+}
+function paintEntry(e) {
+  const i = e._ri; if (i === undefined) return;
+  const set = (id, txt, cls) => { const el = $("#" + id); if (el) { el.textContent = txt; el.className = "num " + (cls || ""); } };
+  const pe = calcEntryPeriod(e, S.period);
+  const ach = pe.aop > 0 ? pe.fy / pe.aop : null, gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
+  set("fy-" + i, fmtK(pe.fy), pe.fy ? "" : "dim");
+  set("aop-" + i, fmtK(pe.aop));
+  set("ach-" + i, fmtPct(ach), clsAch(ach));
+  set("ly-" + i, fmtK(pe.ly));
+  set("gr-" + i, fmtPct(gr), clsSign(gr));
+  const ver = S._fillVer, vr = verRowOf(ver, e.key);
+  if (ver) {
+    const ms = getPeriodMonths(S.period);
+    let vfy = 0; if (vr && vr.m) for (const mi of ms) vfy += (vr.m[mi] || 0);
+    const d = (vr && vr.m) ? pe.fy - vfy : null;
+    set("vfy-" + i, (vr && vr.m) ? fmtK(vfy) : "–");
+    set("dfy-" + i, d === null ? "–" : fmtDK(d), d ? (d > 0 ? "pos delta-up" : "neg delta-dn") : "");
+    const vfyAop = vr ? (function(){ let s=0; for(const mi of ms) s+=(vr.m?vr.m[mi]:0); return s; })() : 0;
+    const va = vr && vr.aop > 0 ? vr.fy / vr.aop : null;
+    const dach = ach !== null && va !== null ? ach - va : null;
+    set("dach-" + i, fmtPP(dach), clsSign(dach));
+  }
+}
+function paintGroupSubs(entries, ver) {
+  const p = S.period || "FY";
+  const ms = getPeriodMonths(p);
+  const pShort = p === "FY" ? "FY" : p;
+  const by = new Map();
+  for (const e of entries) { if (!by.has(e.grp)) by.set(e.grp, []); by.get(e.grp).push(e); }
+  for (const [grp, list] of by) {
+    const elId = 'gsub-' + esc(grp).replace(/[^\w\u4e00-\u9fa5]/g, "_");
+    const el = $("#" + elId); if (!el) continue;
+    const ps = calcEntriesPeriod(list, p);
+    const fy = ps.fy, aop = ps.aop, ly = ps.ly;
+    const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
+    
+    /* 计算分月小计 */
+    const mm = zeros();
+    for (const e of list) for (let i = 0; i < 12; i++) mm[i] += e.m[i].a;
+    
+    let vtxt = "";
+    if (ver) { let vfy = 0, has = false; for (const e of list) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; has = true; } }
+      if (has) { const d = fy - vfy; vtxt = ' · vs上版 <span class="num ' + clsSign(d) + '">' + fmtDK(d) + "</span>"; } }
+    
+    /* 小计行改成跟总计行一样的格式 */
+    let h = '<td class="l stick1"><b>' + esc(grp) + '</b> 小计' + vtxt + '</td>';
+    for (let i = 0; i < 12; i++) h += '<td class="num">' + fmtK(mm[i]) + '</td>';
+    h += '<td class="l"></td>'; // 备注空列
+    h += '<td class="num"><b>' + fmtK(fy) + '</b></td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td>' +
+      '<td class="num">' + fmtK(ly) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + '</td>';
+    if (ver) { let vfy = 0; for (const e of list) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; } }
+      const d = fy - vfy; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td></td>'; }
+    el.parentElement.innerHTML = h;
+  }
+  /* 底部合计行 */
+  const tr = $("#fill-total"); if (!tr) return;
+  const ps = calcEntriesPeriod(entries, p);
+  const fy = ps.fy, aop = ps.aop, ly = ps.ly;
+  const mm = zeros(); for (const e of entries) for (let i = 0; i < 12; i++) mm[i] += e.m[i].a;
+  let h = '<td class="l stick1">合计 (千元)</td>';
+  for (let i = 0; i < 12; i++) h += '<td class="num">' + fmtK(mm[i]) + "</td>";
+  /* 备注 → 空td */
+  h += '<td></td>';
+  const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
+  h += '<td class="num">' + fmtK(fy) + '</td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + "</td>" +
+    '<td class="num">' + fmtK(ly) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>";
+  if (ver) { let vfy = 0; for (const e of entries) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; } }
+    const d = fy - vfy; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td></td>'; }
+  tr.innerHTML = h;
+}
+function paintRepStats(entries, ver) {
+  const el = $("#rep-stats"); if (!el) return;
+  const p = S.period || "FY";
+  const ps = calcEntriesPeriod(entries, p);
+  const fy = ps.fy, aop = ps.aop, ly = ps.ly;
+  const ytdA = entries.reduce((s, e) => s + e.ytdAct, 0), ytdP = entries.reduce((s, e) => s + e.ytdAop, 0);
+  const oT = ps.openTotal, oF = ps.openFilled;
+  const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
+  const ytdGr = ytdP > 0 ? ytdA / ytdP - 1 : null;
+  let vfy = 0, has = false;
+  const ms = getPeriodMonths(p);
+  if (ver) for (const e of entries) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; has = true; } }
+  const d = has ? fy - vfy : null;
+  const pLbl = p === "FY" ? "全年" : p;
+  el.innerHTML =
+    stat("YTD 实际达成", fmtPct(ytdP > 0 ? ytdA / ytdP : null), fmtK(ytdA) + " / " + fmtK(ytdP) + " K") +
+    stat("YTD Growth", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
+    stat(pLbl + "预估 (Act+FCST)", fmtK(fy) + "<span style='font-size:12px'> K</span>", "AOP " + fmtK(aop) + " K") +
+    stat(pLbl + "预估达成 Ach%", '<span class="' + clsAch(ach) + '">' + fmtPct(ach) + "</span>", aop > 0 ? "缺口 " + fmtK(aop - fy) + " K" : "无指标") +
+    stat("FY GR% vs FY" + S.cfg.ly, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年 " + fmtK(ly) + " K") +
+    (ver ? stat("VS上次预估版本", '<span class="' + clsSign(d) + '">' + (d === null ? "–" : fmtDK(d)) + " K</span>", esc(latestVerMeta().label)) : "") +
+    stat("填写进度", oF + " / " + oT, "格(预估月×行)");
+  function stat(t, v, s) { return '<div class="stat"><small>' + t + '</small><b class="num">' + v + '</b><div class="sub">' + s + "</div></div>"; }
+}
+function quickFill(mode) {
+  const entries = S._fillEntries || []; const ver = S._fillVer;
+  const actSet = new Set(S.cfg.actMonths);
+  for (const e of entries) {
+    const cell = ensureCell(S.curRep, e.key);
+    for (let i = 0; i < 12; i++) {
+      if (actSet.has(i + 1)) continue;
+      if (mode === "clear") { cell.a[i] = null; cell.q[i] = null; continue; }
+      if (cell.a[i] != null) continue; // 只填空白
+      let amt = null;
+      if (mode === "aop") amt = e.row.aopA[i] || null;
+      else if (mode === "ly") amt = e.row.lyA[i] || null;
+      else if (mode === "prev") { const vr = verRowOf(ver, e.key); amt = vr && vr.m ? (vr.m[i] || null) : null; }
+      if (amt != null && amt !== 0) { cell.a[i] = amt; cell.q[i] = e.asp > 0 ? amt / e.asp : null; }
+    }
+  }
+  saveRepDoc(S.curRep);
+  renderFill(); renderCtx();
+  toast(mode === "clear" ? "已清空" : "已填充空白预估格");
+}
+function openAddRow() {
+  const grps = [...new Set([...S.idx.values()].map(r => r.grp))].sort((a, b) => a.localeCompare(b, "zh"));
+  const provs = [...new Set([...S.idx.values()].map(r => r.prov))].sort((a, b) => a.localeCompare(b, "zh"));
+  openModal("新增产品 / 省份行", 
+    '<p class="hint" style="margin-bottom:10px">用于本月产生了系统里还没有的新组合(如首次销售 P30 设备)。该行会以"新增"标记出现在您和看板的明细里;下月系统数据若已包含此组合,会自动合并,无需删除。</p>' +
+    '<div class="field" style="margin-bottom:10px"><label>产品组</label><select class="ctrl" id="ar-grp">' + grps.map(g => "<option>" + esc(g) + "</option>").join("") + "</select></div>" +
+    '<div class="field"><label>省份</label><input class="ctrl" id="ar-prov" list="prov-list" placeholder="输入或选择省份"><datalist id="prov-list">' + provs.map(p => "<option>" + esc(p) + "</option>").join("") + "</datalist></div>",
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="ar-ok">添加</button>');
+  $("#ar-ok").onclick = () => {
+    const grp = $("#ar-grp").value, prov = $("#ar-prov").value.trim();
+    if (!prov) { toast("请填写省份"); return; }
+    const key = rowKey(S.curRep, prov, grp);
+    if (S.idx.has(key) || (S.fcs.get(S.curRep) || { rows: {} }).rows[key]) { toast("该行已存在"); closeModal(); return; }
+    const c = ensureCell(S.curRep, key); c.manual = 1; c.prov = prov; c.grp = grp;
+    saveRepDoc(S.curRep); closeModal(); renderFill();
+  };
+}
+
+/* =====================================================================
+   ② 数据看板
+   ===================================================================== */
+async function renderDash() {
+  const host = $("#tab-dash");
+  if (!S.master || !S.cfg) { host.innerHTML = '<div class="card"><div class="empty"><b>还没有数据</b>请先在「管理后台」导入系统导出文件。</div></div>'; return; }
+  const d = S.dash;
+  const vs = (S.cfg.versions || []);
+  if (d.cmp === "latest") d.cmpId = vs.length ? vs[vs.length - 1].id : "";
+  const ver = d.cmpId ? await getVersion(d.cmpId) : null;
+  const verMeta = vs.find(v => v.id === d.cmpId);
+
+  let entries = scopedEntries();
+  /* 期间筛选 */
+  const dp = d.period || "FY";
+  const ms = getPeriodMonths(dp);
+  const pShort = dp === "FY" ? "FY" : dp;
+
+  /* 维度下钻筛选: 先应用各维度筛选 */
+  if (!d.drillFilters) d.drillFilters = {};
+  const otherDims = Object.keys(dimDefs).filter(k => k !== d.dim);
+  for (const dk of otherDims) {
+    const fv = d.drillFilters[dk];
+    if (fv && fv.length) entries = entries.filter(e => fv.includes(dimDefs[dk].f(e)));
+  }
+
+  const rsms = [...new Set(entries.map(e => e.rsm))].sort();
+  if (d.rsm && !rsms.includes(d.rsm)) d.rsm = "";
+  if (d.rsm) entries = entries.filter(e => e.rsm === d.rsm);
+  if (d.q) { const q = d.q.toLowerCase(); entries = entries.filter(e => (e.rep + e.prov + e.grp + e.dsm + e.rsm).toLowerCase().includes(q)); }
+
+  const rows = rollup(entries, dimDefs[d.dim].f);
+  if (d.dim === "grp") rows.sort((a, b) => grpSortKey(a.dim).localeCompare(grpSortKey(b.dim)));
+  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm) : null;
+
+  /* 期间总览 */
+  const T = rows.reduce((o, r) => {
+    for (const i of ms) { o.m[i] += r.m[i]; o.aopM[i] += r.aopA[i]; o.lyM[i] += r.lyA[i]; }
+    return o;
+  }, { m: zeros(), aopM: zeros(), lyM: zeros() });
+  let tFy = 0, tAop = 0, tLy = 0;
+  for (const i of ms) { tFy += T.m[i]; tAop += T.aopM[i]; tLy += T.lyM[i]; }
+
+  let html = '<div class="card"><div class="card-h"><h3>筛选与口径</h3>' +
+    '<div class="seg" id="dim-seg">' + Object.keys(dimDefs).map(k => '<button data-d="' + k + '" class="' + (d.dim === k ? "on" : "") + '">' + dimDefs[k].name + "</button>").join("") + "</div>" +
+    '<div class="seg" id="met-seg"><button data-m="amt" class="' + (d.metric === "amt" ? "on" : "") + '">金额 K</button><button data-m="qty" class="' + (d.metric === "qty" ? "on" : "") + '">数量</button></div>' +
+    '<div class="seg" id="dash-period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (dp === p.key ? "on" : "") + '">' + p.key + '</button>').join('') + '</div>' +
+    '<select class="ctrl" id="rsm-f"><option value="">全部大区</option>' + rsms.map(r => '<option' + (d.rsm === r ? " selected" : "") + ">" + esc(r) + "</option>").join("") + "</select>" +
+    '<select class="ctrl" id="cmp-sel"><option value="">不对比版本</option>' + vs.map(v => '<option value="' + v.id + '"' + (d.cmpId === v.id ? " selected" : "") + ">对比: " + esc(v.label) + "</option>").join("") + "</select>" +
+    '<input class="ctrl" id="dash-q" placeholder="搜索代表/省/产品…" value="' + esc(d.q) + '" style="width:160px">' +
+    '<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="show-m"' + (d.months ? " checked" : "") + ">显示月度列</label>" +
+    '<button class="btn pri sm" id="exp-xlsx" style="margin-left:auto">\u2b07 导出 Excel</button>' +
+    "</div>";
+
+  /* 维度下钻筛选器行 */
+  html += '<div style="padding:6px 16px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">';
+  html += '<span class="hint" style="margin-right:4px">维度下钻筛选:</span>';
+  for (const dk of otherDims) {
+    const allVals = [...new Set(scopedEntries().map(e => dimDefs[dk].f(e)))].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh"));
+    const selected = d.drillFilters[dk] || [];
+    const triggerText = selected.length ? (selected.length === 1 ? esc(selected[0]) : '已选 ' + selected.length + ' 项') : '全部' + dimDefs[dk].name;
+    html += '<div class="ms-wrap" id="ms-wrap-' + dk + '" data-dk="' + dk + '">';
+    html += '<div class="ms-trigger" id="ms-trigger-' + dk + '">' + triggerText + '</div>';
+    html += '<div class="ms-panel">';
+    html += '<label class="ms-all"><input type="checkbox" data-all="' + dk + '"' + (!selected.length ? ' checked' : '') + '> 全部' + dimDefs[dk].name + '</label>';
+    for (const v of allVals) html += '<label><input type="checkbox" data-dk="' + dk + '" value="' + esc(v) + '"' + (selected.includes(v) ? ' checked' : '') + '> ' + esc(v) + '</label>';
+    html += '</div></div>';
+  }
+  html += '<button class="btn sm" id="drill-clear">清除筛选</button>';
+  html += '</div>';
+
+  html += monthChart(T.m, T.aopM, T.lyM) + "</div>";
+
+  /* 主表 */
+  const isAmt = d.metric === "amt";
+  const vK = isAmt ? fmtK : fmtQ;
+  html += '<div class="card"><div class="card-h"><h3>' + dimDefs[d.dim].name + ' \u6c47\u603b <span class="hint">(' + (isAmt ? "\u5343\u5143" : "\u6570\u91cf") + (verMeta ? " \xb7 \u5bf9\u6bd4 " + esc(verMeta.label) : "") + ' \xb7 \u671f\u95f4: ' + pShort + ')</span></h3><span class="hint">\u70b9\u51fb\u884c\u5c55\u5f00\u660e\u7ec6\u4e0e\u5907\u6ce8</span></div>' +
+    '<div class="twrap"><table class="dt"><thead><tr><th class="l stick1" style="min-width:170px">' + dimDefs[d.dim].name.slice(0, 2) + "</th>";
+  if (d.months) for (let i = 0; i < 12; i++) html += "<th>" + MN[i] + "</th>";
+  html += '<th>YTD Ach%</th><th>' + pShort + '\u9884\u4f30</th><th>' + pShort + ' AOP</th><th>' + pShort + ' Ach%</th><th>' + S.cfg.ly + pShort + '</th><th>' + pShort + ' GR%</th>' +
+    (ver ? "<th>\u4e0a\u7248" + pShort + "</th><th>\u0394" + pShort + "</th><th>\u0394Ach</th><th>\u0394GR</th>" : "") +
+    '<th>\u586b\u5199\u8fdb\u5ea6</th><th class="l">\u5907\u6ce8</th></tr></thead><tbody>';
+
+  let ridx = 0;
+  const actSetDash = new Set(S.cfg.actMonths || []);
+  for (const r of rows) {
+    let rFy = 0, rAop = 0, rLy = 0, rFyq = 0, rAopQ = 0, rLyQ = 0;
+    for (const i of ms) { rFy += r.m[i]; rAop += r.aopA[i]; rLy += r.lyA[i]; rFyq += r.mq[i]; rAopQ += r.aopQ2[i]; rLyQ += r.lyQ2[i]; }
+    const fyV = isAmt ? rFy : rFyq, aopV = isAmt ? rAop : rAopQ, lyV = isAmt ? rLy : rLyQ;
+    const achV = aopV > 0 ? fyV / aopV : null, grV = lyV > 0 ? fyV / lyV - 1 : null;
+    const ach = rAop > 0 ? rFy / rAop : null, gr = rLy > 0 ? rFy / rLy - 1 : null;
+    const vr = vRoll ? vRoll.get(r.dim) : null;
+    const open = d.open.has(r.dim);
+    html += '<tr class="dash-row" data-dim="' + esc(r.dim) + '" style="cursor:pointer"><td class="l stick1">' + (open ? "\u25be " : "\u25b8 ") + esc(r.dim) + "</td>";
+    if (d.months) for (let i = 0; i < 12; i++) html += '<td class="num' + (actSetDash.has(i + 1) ? " act-cell" : "") + '">' + vK(isAmt ? r.m[i] : r.mq[i]) + "</td>";
+    let ytdAct = 0, ytdAop = 0;
+    for (const i of ms) { if (actSetDash.has(i + 1)) { ytdAct += r.m[i]; ytdAop += r.aopA[i]; } }
+    html += '<td class="num">' + fmtPct(ytdAop > 0 ? ytdAct / ytdAop : null) + "</td>" +
+      '<td class="num"><b>' + vK(fyV) + '</b></td><td class="num">' + vK(aopV) + "</td>" +
+      '<td class="num ' + clsAch(achV) + '">' + fmtPct(achV) + "</td>" +
+      '<td class="num">' + vK(lyV) + '</td><td class="num ' + clsSign(grV) + '">' + fmtPct(grV) + "</td>";
+    if (ver) {
+      if (vr) {
+        const vfy = isAmt ? vr.fy : vr.fyq; const dlt = fyV - vfy;
+        const vach = vr.aop > 0 ? vr.fy / vr.aop : null, vgr = vr.ly > 0 ? vr.fy / vr.ly - 1 : null;
+        const dach = ach !== null && vach !== null ? ach - vach : null;
+        const dgr = gr !== null && vgr !== null ? gr - vgr : null;
+        html += '<td class="num">' + vK(vfy) + '</td><td class="num ' + (dlt > 1e-6 ? "pos delta-up" : dlt < -1e-6 ? "neg delta-dn" : "") + '">' + (isAmt ? fmtDK(dlt) : (dlt > 0 ? "+" : "") + fmtQ(dlt)) + "</td>" +
+          '<td class="num ' + clsSign(dach) + '">' + fmtPP(dach) + '</td><td class="num ' + clsSign(dgr) + '">' + fmtPP(dgr) + "</td>";
+      } else html += '<td class="num dim">\u65b0\u589e</td><td class="num pos">' + (isAmt ? fmtDK(fyV) : "+" + fmtQ(fyV)) + "</td><td>\u2013</td><td>\u2013</td>";
+    }
+    const prog = r.openTotal ? Math.round(r.openFilled / r.openTotal * 100) : 100;
+    html += '<td class="num ' + (prog === 100 ? "pos" : prog === 0 ? "dim" : "warn") + '">' + prog + '%</td>' +
+      '<td class="l">' + (r.rms.length ? '<span class="tag" style="background:var(--blue-soft);color:var(--blue)">' + r.rms.length + " \u6761</span>" : '<span class="dim" style="color:var(--mute)">\u2014</span>') + "</td></tr>";
+    if (open) html += dashDetail(r, ver, isAmt, d, dp);
+    ridx++;
+  }
+  /* 合计 */
+  const tAch = tAop > 0 ? tFy / tAop : null, tGr = tLy > 0 ? tFy / tLy - 1 : null;
+  html += '<tr class="total-row"><td class="l stick1">\u5408\u8ba1</td>';
+  if (d.months) for (let i = 0; i < 12; i++) html += '<td class="num">' + vK(isAmt ? T.m[i] : rows.reduce((s, r) => s + r.mq[i], 0)) + "</td>";
+  html += '<td class="num">' + fmtPct(tAop > 0 ? tFy / tAop : null) + '</td><td class="num"><b>' + vK(isAmt ? tFy : rows.reduce((s, r) => { let q=0; for(const i of ms) q+=r.mq[i]; return s+q; }, 0)) + '</b></td><td class="num">' + vK(isAmt ? tAop : rows.reduce((s, r) => { let q=0; for(const i of ms) q+=r.aopQ2[i]; return s+q; }, 0)) + "</td>" +
+    '<td class="num ' + clsAch(tAch) + '">' + fmtPct(tAch) + "</td>" +
+    '<td class="num">' + vK(isAmt ? tLy : rows.reduce((s, r) => { let q=0; for(const i of ms) q+=r.lyQ2[i]; return s+q; }, 0)) + '</td><td class="num ' + clsSign(tGr) + '">' + fmtPct(tGr) + "</td>";
+  if (ver) { let vt = 0; for (const [, v] of (vRoll || new Map())) vt += isAmt ? v.fy : v.fyq; const dt2 = (isAmt ? tFy : rows.reduce((s, r) => { let q=0; for(const i of ms) q+=r.mq[i]; return s+q; }, 0)) - vt;
+    html += '<td class="num">' + vK(vt) + '</td><td class="num ' + clsSign(dt2) + '">' + (isAmt ? fmtDK(dt2) : (dt2 > 0 ? "+" : "") + fmtQ(dt2)) + "</td><td></td><td></td>"; }
+  html += "<td></td><td></td></tr></tbody></table></div></div>";
+
+  /* 备注墙 */
+  const allRm = entries.filter(e => e.rm);
+  const allowReps = new Set(scopeReps());
+  const overalls = [...S.fcs.values()].filter(x => x.overall && allowReps.has(x.rep) && (!d.rsm || (S.repInfo.get(x.rep) || {}).rsm === d.rsm));
+  html += '<div class="card"><div class="card-h"><h3>\ud83d\udcdd \u5907\u6ce8\u6c47\u603b <span class="hint">' + allRm.length + " \u6761\u884c\u5907\u6ce8 \xb7 " + overalls.length + " \u6761\u6574\u4f53\u8bf4\u660e \u2014 \u5907\u6ce8\u6c38\u8fdc\u8ddf\u968f\u6570\u636e\u884c,\u5207\u6362\u7ef4\u5ea6\u4e0d\u4f1a\u9519\u4f4d</span></h3></div><div>";
+  for (const x of overalls) html += '<div class="rm-li"><span class="who">\u3010\u6574\u4f53\u3011' + esc(x.rep) + "</span>" + esc(x.overall) + "</div>";
+  for (const e of allRm.sort((a, b) => b.fy - a.fy)) {
+    const pe = calcEntryPeriod(e, dp);
+    const vr = verRowOf(ver, e.key); const dlt = vr ? (function(){ const ms2=getPeriodMonths(dp); let s=0; if(vr.m) for(const i of ms2) s+=(vr.m[i]||0); return pe.fy-s; })() : null;
+    html += '<div class="rm-li"><span class="who">' + esc(e.rep) + " \xb7 " + esc(e.prov) + " \xb7 <b>" + esc(e.grp) + "</b></span>" + esc(e.rm) +
+      ' <span class="num" style="color:var(--mute);font-size:11px">(' + pShort + ' ' + fmtK(pe.fy) + "K" + (dlt !== null ? ' \xb7 vs\u4e0a\u7248 <span class="' + clsSign(dlt) + '">' + fmtDK(dlt) + "</span>" : "") + ")</span></div>";
+  }
+  if (!allRm.length && !overalls.length) html += '<div class="empty">\u6682\u65e0\u5907\u6ce8</div>';
+  html += "</div></div>";
+
+  host.innerHTML = html;
+  /* events */
+  $("#dim-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.dim = b.dataset.d; d.open.clear(); d.drillFilters = {}; renderDash(); } };
+  $("#met-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.metric = b.dataset.m; renderDash(); } };
+  $("#dash-period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { d.period = b.dataset.p; renderDash(); } };
+  $("#rsm-f").onchange = e => { d.rsm = e.target.value; renderDash(); };
+  $("#cmp-sel").onchange = e => { d.cmp = "manual"; d.cmpId = e.target.value; renderDash(); };
+  $("#dash-q").onchange = e => { d.q = e.target.value.trim(); renderDash(); };
+  $("#show-m").onchange = e => { d.months = e.target.checked; renderDash(); };
+  $("#exp-xlsx").onclick = () => exportDashXlsx(rows, entries, ver, verMeta);
+  $$(".dash-row").forEach(tr => tr.onclick = ev => { if (ev.target.closest("input")) return; const k = tr.dataset.dim; d.open.has(k) ? d.open.delete(k) : d.open.add(k); renderDash(); });
+  
+  /* 多选下拉事件绑定 */
+  for (const dk of otherDims) {
+    const wrap = $("#ms-wrap-" + dk);
+    if (!wrap) continue;
+    const trigger = $("#ms-trigger-" + dk);
+    const panel = wrap.querySelector(".ms-panel");
+    
+    trigger.onclick = e => {
+      e.stopPropagation();
+      const isOpen = wrap.classList.contains("open");
+      $$(".ms-wrap").forEach(w => w.classList.remove("open"));
+      if (!isOpen) wrap.classList.add("open");
+    };
+    
+    panel.onclick = e => {
+      e.stopPropagation();
+      const allCb = panel.querySelector('input[data-all="' + dk + '"]');
+      const itemCbs = [...panel.querySelectorAll('input[data-dk="' + dk + '"]')];
+      
+      if (e.target === allCb || e.target.closest('label') === allCb.closest('label')) {
+        if (allCb.checked) {
+          itemCbs.forEach(cb => cb.checked = false);
+          d.drillFilters[dk] = [];
+        }
+      } else {
+        const checked = itemCbs.filter(cb => cb.checked).map(cb => cb.value);
+        allCb.checked = !checked.length;
+        d.drillFilters[dk] = checked;
+      }
+      
+      const selected = d.drillFilters[dk] || [];
+      trigger.textContent = selected.length ? (selected.length === 1 ? selected[0] : '已选 ' + selected.length + ' 项') : '全部' + dimDefs[dk].name;
+    };
+  }
+  
+  /* document click：关闭面板并刷新 */
+  if (S._dashClickHandler) document.removeEventListener("click", S._dashClickHandler);
+  S._dashClickHandler = function(e) {
+    if (!e.target.closest(".ms-wrap")) {
+      const wasOpen = $$(".ms-wrap.open").length > 0;
+      $$(".ms-wrap").forEach(w => w.classList.remove("open"));
+      if (wasOpen) renderDash();
+    }
+  };
+  document.addEventListener("click", S._dashClickHandler);
+  
+  if ($("#drill-clear")) $("#drill-clear").onclick = () => { d.drillFilters = {}; renderDash(); };
+  
+  /* 列宽拖拽初始化 */
+  requestAnimationFrame(() => initResizableTable($("#tab-dash table.dt")));
+}
+function dashDetail(r, ver, isAmt, d, dp) {
+  const ms = getPeriodMonths(dp || "FY");
+  const pShort = (dp || "FY") === "FY" ? "FY" : (dp || "FY");
+  const cols = 1 + (d.months ? 12 : 0) + 6 + (ver ? 4 : 0) + 2;
+  let h = '<tr><td colspan="' + cols + '" style="background:#FBFCFE;padding:8px 14px 12px">' +
+    '<table class="dt" style="font-size:12px"><thead><tr><th class="l">\u4ee3\u8868</th><th class="l">\u7701\u4efd</th><th class="l">\u4ea7\u54c1\u7ec4</th><th>' + pShort + '\u9884\u4f30</th><th>AOP</th><th>Ach%</th><th>GR%</th>' + (ver ? "<th>\u4e0a\u7248" + pShort + "</th><th>\u0394" + pShort + "</th>" : "") + '<th class="l">\u5907\u6ce8</th></tr></thead><tbody>';
+  for (const e of r.items.sort((a, b) => b.fy - a.fy)) {
+    const pe = calcEntryPeriod(e, dp || "FY");
+    const ach = pe.aop > 0 ? pe.fy / pe.aop : null, gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
+    const vr = verRowOf(ver, e.key);
+    let vfy = 0; if (vr && vr.m) for (const i of ms) vfy += (vr.m[i] || 0);
+    const dlt = (vr && vr.m) ? pe.fy - vfy : null;
+    h += '<tr><td class="l">' + esc(e.rep) + '</td><td class="l">' + esc(e.prov) + '</td><td class="l">' + esc(e.grp) + (e.manual ? '<span class="tag new">\u65b0\u589e</span>' : "") + "</td>" +
+      '<td class="num">' + fmtK(pe.fy) + '</td><td class="num">' + fmtK(pe.aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>" +
+      (ver ? '<td class="num">' + (vr && vr.m ? fmtK(vfy) : "\u2013") + '</td><td class="num ' + clsSign(dlt) + '">' + (dlt === null ? "\u65b0\u589e" : fmtDK(dlt)) + "</td>" : "") +
+      '<td class="l" style="white-space:normal;max-width:300px">' + esc(e.rm || "") + "</td></tr>";
+  }
+  return h + "</tbody></table></td></tr>";
+}
+function monthChart(blend, aop, ly) {
+  const W = 1180, H = 150, pad = 34, bw = 30;
+  const max = Math.max(...blend, ...aop, ...ly, 1) * 1.12;
+  const x = i => pad + i * ((W - pad * 2) / 12) + 18;
+  const y = v => H - 26 - (v / max) * (H - 44);
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
+  let s = '<div class="chartbox"><svg viewBox="0 0 ' + W + " " + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
+    '<defs><pattern id="hat" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#DCE8FF"/><line x1="0" y1="0" x2="0" y2="6" stroke="#5B8DEF" stroke-width="2.2"/></pattern></defs>';
+  for (let i = 0; i < 12; i++) {
+    const isAct = actSet.has(i + 1);
+    s += '<rect x="' + (x(i) - bw / 2) + '" y="' + y(blend[i]) + '" width="' + bw + '" height="' + Math.max(0, H - 26 - y(blend[i])) + '" rx="3" fill="' + (isAct ? "#1C3257" : "url(#hat)") + '"' + (isAct ? "" : ' stroke="#5B8DEF" stroke-width="1"') + "><title>" + MN[i] + (isAct ? " 实际 " : " 预估 ") + fmtK(blend[i]) + "K</title></rect>";
+    s += '<text x="' + x(i) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="11" fill="#7A879C">' + (i + 1) + "月</text>";
+    s += '<text x="' + x(i) + '" y="' + (y(blend[i]) - 4) + '" text-anchor="middle" font-size="9.5" fill="#3B4A63" font-family="Bahnschrift,Segoe UI">' + fmtK(blend[i], 0) + "</text>";
+  }
+  let pl = "", pl2 = "";
+  for (let i = 0; i < 12; i++) { pl += (i ? "L" : "M") + x(i) + "," + y(aop[i]) + " "; pl2 += (i ? "L" : "M") + x(i) + "," + y(ly[i]) + " "; }
+  s += '<path d="' + pl2 + '" fill="none" stroke="#B9C2D2" stroke-width="1.6" stroke-dasharray="2 3"/>';
+  s += '<path d="' + pl + '" fill="none" stroke="#C2362B" stroke-width="1.8"/>';
+  for (let i = 0; i < 12; i++) s += '<circle cx="' + x(i) + '" cy="' + y(aop[i]) + '" r="2.6" fill="#C2362B"><title>' + MN[i] + " AOP " + fmtK(aop[i]) + "K</title></circle>";
+  s += "</svg></div>" +
+    '<div class="legend"><span><i style="background:#1C3257"></i>已关账实际</span><span><i style="background:url(#hat);border:1px solid #5B8DEF;background:repeating-linear-gradient(45deg,#DCE8FF,#DCE8FF 2px,#5B8DEF 2px,#5B8DEF 3px)"></i>预估</span><span><i style="background:#C2362B;height:3px;margin-bottom:3px"></i>AOP 指标</span><span><i style="background:#B9C2D2;height:2px;margin-bottom:3px"></i>FY' + ((S.cfg && S.cfg.ly) || "") + ' 同期</span><span style="margin-left:auto">单位:千元 K</span></div>';
+  return s;
+}
+/* —— 看板导出 Excel —— */
+function exportDashXlsx(rows, entries, ver, verMeta) {
+  if (typeof XLSX === "undefined") { toast("Excel 组件未加载(需联网加载一次)"); return; }
+  const wb = XLSX.utils.book_new();
+  const K = v => Math.round(v / 100) / 10; // 千元1位
+  const P = v => v === null || !isFinite(v) ? null : Math.round(v * 1000) / 10; // %1位
+  const d = S.dash;
+  const head1 = [dimDefs[d.dim].name, "YTD Ach%", "FY预估K", "FY AOP K", "Ach%", "FY" + S.cfg.ly + " K", "GR%", "上版FY K", "ΔFY K", "ΔAch pp", "ΔGR pp", "填写进度%", "备注条数"];
+  const aoa1 = [["周期", S.cfg.cycleLabel, "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
+  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm) : null;
+  for (const r of rows) {
+    const ach = r.aop > 0 ? r.fy / r.aop : null, gr = r.ly > 0 ? r.fy / r.ly - 1 : null;
+    const vr = vRoll ? vRoll.get(r.dim) : null;
+    const vach = vr && vr.aop > 0 ? vr.fy / vr.aop : null, vgr = vr && vr.ly > 0 ? vr.fy / vr.ly - 1 : null;
+    aoa1.push([r.dim, P(r.ytdAop > 0 ? r.ytdAct / r.ytdAop : null), K(r.fy), K(r.aop), P(ach), K(r.ly), P(gr),
+      vr ? K(vr.fy) : null, vr ? K(r.fy - vr.fy) : null,
+      ach !== null && vach !== null ? P(ach - vach) : null, gr !== null && vgr !== null ? P(gr - vgr) : null,
+      r.openTotal ? Math.round(r.openFilled / r.openTotal * 100) : 100, r.rms.length]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), "汇总-" + dimDefs[d.dim].name.slice(0, 4));
+  /* 明细 */
+  const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " K"), "FY预估K", "FY AOP K", "Ach%", "FY" + S.cfg.ly + " K", "GR%", "上版FY K", "ΔFY K", "备注"]];
+  for (const e of entries.slice().sort((a, b) => a.rsm.localeCompare(b.rsm, "zh") || a.rep.localeCompare(b.rep, "zh") || b.fy - a.fy)) {
+    const vr = verRowOf(ver, e.key);
+    aoa2.push([e.rsm, e.dsm, e.rep, e.prov, e.grp, ...e.m.map(c => K(c.a)),
+      K(e.fy), K(e.aop), P(e.aop > 0 ? e.fy / e.aop : null), K(e.ly), P(e.ly > 0 ? e.fy / e.ly - 1 : null),
+      vr ? K(vr.fy) : null, vr ? K(e.fy - vr.fy) : null, e.rm || ""]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), "全部明细");
+  /* 备注 */
+  const aoa3 = [["代表", "省份", "产品组", "备注", "本版FY K", "上版FY K", "ΔFY K"]];
+  for (const e of entries.filter(x => x.rm)) { const vr = verRowOf(ver, e.key); aoa3.push([e.rep, e.prov, e.grp, e.rm, K(e.fy), vr ? K(vr.fy) : null, vr ? K(e.fy - vr.fy) : null]); }
+  const expAllow = new Set(scopeReps());
+  for (const x of [...S.fcs.values()].filter(x => x.overall && expAllow.has(x.rep))) aoa3.push([x.rep, "", "【整体说明】", x.overall, null, null, null]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3), "备注清单");
+  XLSX.writeFile(wb, "预估看板_" + S.cfg.cycleLabel + ".xlsx");
+}
+
+/* =================== 弹窗 =================== */
+function openModal(title, body, footer) {
+  const m = $("#modal");
+  m.innerHTML = '<div class="modal-h"><b>' + title + '</b><button class="icon-btn" onclick="closeModal()">✕</button></div>' +
+    '<div class="modal-b">' + body + '</div>' + (footer ? '<div class="modal-f">' + footer + '</div>' : "");
+  $("#mask").classList.add("show");
+}
+function closeModal() { $("#mask").classList.remove("show"); }
+const dt = ts => new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes()); }
+function downloadJSON(name, obj) {
+  const blob = new Blob([JSON.stringify(obj)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+}
+
+/* =================== 系统数据导入流程 =================== */
+async function onXlsxFile(file) {
+  if (typeof XLSX === "undefined") {
+    openModal("无法读取 Excel", "<p>SheetJS 解析库未能加载(当前网络可能无法访问 cdnjs.cloudflare.com)。请换有外网的环境打开本工具,或让 IT 把 xlsx.full.min.js 内联进本文件。</p>", '<button class="btn pri" onclick="closeModal()">知道了</button>');
+    return;
+  }
+  toast("正在解析 " + file.name + " …");
+  try {
+    const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+    let best = null, bestScore = -1;
+    for (const n of wb.SheetNames) {
+      const ws = wb.Sheets[n]; if (!ws || !ws["!ref"]) continue;
+      const r = XLSX.utils.decode_range(ws["!ref"]);
+      const score = (r.e.r - r.s.r) + (/detail/i.test(n) ? 1e9 : 0);
+      if (score > bestScore) { bestScore = score; best = n; }
+    }
+    if (!best) { toast("⚠ 文件里没有可用的工作表"); return; }
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[best], { defval: null });
+    if (!rows.length) { toast("⚠ 工作表「" + best + "」是空的"); return; }
+    const C = detectCols(Object.keys(rows[0]));
+    if (C.err) { openModal("列识别失败", "<p>" + esc(C.err) + '</p><p style="color:var(--mute);font-size:12px;word-break:break-all">检测到的表头: ' + esc(Object.keys(rows[0]).join(" | ")) + "</p>", '<button class="btn pri" onclick="closeModal()">关闭</button>'); return; }
+    const agg = aggregateRows(rows, C);
+    if (!agg.rows.length) { toast("⚠ 没有解析到任何有效数据行"); return; }
+    S.pendingImport = { fileName: file.name, sheet: best, C, agg };
+    openImportPreview();
+  } catch (err) { console.error(err); openModal("解析失败", "<p>" + esc(err && err.message || String(err)) + "</p>", '<button class="btn pri" onclick="closeModal()">关闭</button>'); }
+}
+function defaultCycleLabel(cy, months) {
+  const last = months.length ? Math.max(...months) : 0;
+  return "20" + cy + "年" + Math.min(12, last + 1) + "月预估";
+}
+function openImportPreview() {
+  const p = S.pendingImport; if (!p) return;
+  const a = p.agg, sg = new Set(a.suggested);
+  const reps = new Set(a.rows.map(r => r.rep)), provs = new Set(a.rows.map(r => r.prov)), grps = new Set(a.rows.map(r => r.grp));
+  let b = '<div style="font-size:13px;line-height:1.7"><p>📄 <b>' + esc(p.fileName) + "</b> · 工作表「" + esc(p.sheet) + "」</p>" +
+    '<p>识别年份: <b>FY' + p.C.cy + "</b>(对比 FY" + p.C.ly + ") · 明细 <b>" + a.used.toLocaleString() + "</b> 行 → 聚合 <b>" + a.rows.length + "</b> 个组合<br>" +
+    "代表 <b>" + reps.size + "</b> 人 · 省份 <b>" + provs.size + "</b> 个 · 产品组 <b>" + grps.size + "</b> 个" + (a.bu ? " · BU: " + esc(a.bu) : "") + "</p>" +
+    '<div class="field" style="margin:10px 0"><label>已关账月份(灰色锁定为实际数;已按「当月实际 ≥ 当月AOP 20%」预勾选,可手动调整)</label><div style="margin-top:5px">' +
+    MN.map((m, i) => '<span class="chip-toggle' + (sg.has(i + 1) ? " q" : "") + '" data-im="' + (i + 1) + '">' + m + (sg.has(i + 1) ? " ✓" : "") + "</span>").join("") + "</div></div>" +
+    '<div class="field" style="margin:10px 0"><label>周期标签</label><input class="ctrl" id="im-label" style="width:100%" value="' + esc(defaultCycleLabel(p.C.cy, a.suggested)) + '"></div>';
+  if (S.master && S.cfg) b += '<label style="display:flex;gap:7px;align-items:flex-start;font-size:12.5px;background:var(--blue-soft,#EEF4FF);border-radius:8px;padding:9px 11px"><input type="checkbox" id="im-snap" checked style="margin-top:2px"><span>导入前把<b>当前数据</b>自动保存为版本快照「' + esc(S.cfg.cycleLabel || "上一版") + '」,导入后即可对比 Δ 变化(推荐)</span></label>';
+  b += '<p style="color:var(--mute);font-size:12px;margin-top:10px">✓ 已有的销售预估和备注会按 代表+省份+产品组 自动对上;新产品、新代表、岗位号(空缺岗位)都会自动出现在填写页。</p></div>';
+  openModal("导入预览与确认", b, '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="im-ok">确认导入</button>');
+  $$("#modal [data-im]").forEach(ch => ch.onclick = () => { ch.classList.toggle("q"); ch.textContent = MN[+ch.dataset.im - 1] + (ch.classList.contains("q") ? " ✓" : ""); });
+  $("#im-ok").onclick = commitImport;
+}
+async function commitImport() {
+  const p = S.pendingImport; if (!p) return;
+  const months = []; $$("#modal [data-im]").forEach(ch => { if (ch.classList.contains("q")) months.push(+ch.dataset.im); }); months.sort((a, b) => a - b);
+  const label = ($("#im-label") && $("#im-label").value.trim()) || defaultCycleLabel(p.C.cy, months);
+  const doSnap = $("#im-snap") && $("#im-snap").checked && S.master && S.cfg;
+  closeModal(); toast("正在写入数据 …");
+  if (doSnap) await buildSnapshot((S.cfg.cycleLabel || "上一版") + " · 导入前快照");
+  const old = S.cfg || {};
+  const cfg = { cycleLabel: label, cy: p.C.cy, ly: p.C.ly, actMonths: months,
+    qtyGroups: old.qtyGroups || [], aspOverride: old.aspOverride || {}, adminPin: old.adminPin || "",
+    mgrPin: old.mgrPin || "", rsmScope: old.rsmScope || "all", versions: old.versions || [] };
+  const master = { meta: { importedAt: Date.now(), fileName: p.fileName, sheet: p.sheet, srcRows: p.agg.used, combos: p.agg.rows.length, bu: p.agg.bu || "" }, rows: p.agg.rows };
+  const ok1 = await Store.set("fc-master", master), ok2 = await Store.set("fc-cfg", cfg);
+  S.pendingImport = null;
+  if (ok1 && ok2) { await loadAll(); rerender(); toast("✅ 导入完成: " + master.meta.combos + " 个组合 · 关账 " + (months.length ? months.join("、") + "月" : "无")); }
+  else toast("⚠ 写入失败,请重试");
+}
+
+/* =================== 版本快照 =================== */
+async function buildSnapshot(label) {
+  if (!S.master || !S.cfg) { toast("还没有数据,无法保存版本"); return null; }
+  const rows = {};
+  for (const e of buildEntries()) rows[e.key] = { rep: e.rep, prov: e.prov, grp: e.grp, rsm: e.rsm, dsm: e.dsm, fy: e.fy, fyq: e.fyq, aop: e.aop, ly: e.ly, rm: e.rm || "", m: e.m.map(c => c.act ? null : c.a) };
+  const id = uid();
+  const ver = { id, label, savedAt: Date.now(), cycleLabel: S.cfg.cycleLabel, actMonths: S.cfg.actMonths, rows };
+  if (!await Store.set("fc-v-" + id, ver)) { toast("⚠ 版本保存失败"); return null; }
+  S.cfg.versions = (S.cfg.versions || []).concat([{ id, label, savedAt: ver.savedAt }]);
+  await Store.set("fc-cfg", S.cfg);
+  S.verCache.set(id, ver);
+  return id;
+}
+function openSnapModal() {
+  if (!S.master || !S.cfg) { toast("请先导入数据"); return; }
+  const def = (S.cfg.cycleLabel || "版本") + " · " + new Date().toLocaleDateString("zh-CN");
+  openModal("保存版本快照",
+    '<p style="font-size:13px;color:var(--ink2)">把<b>当前所有人</b>的预估冻结为一个版本。之后填写页与看板会自动显示与最近版本的 ΔFY / ΔAch / ΔGR。建议每次提报截止时保存一次。</p>' +
+    '<div class="field" style="margin-top:10px"><label>版本名称</label><input class="ctrl" id="snap-label" style="width:100%" value="' + esc(def) + '"></div>',
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="snap-ok">保存</button>');
+  $("#snap-ok").onclick = async () => {
+    const lab = $("#snap-label").value.trim() || def; closeModal(); toast("正在保存版本 …");
+    if (await buildSnapshot(lab)) { rerender(); toast("✅ 版本已保存: " + lab); }
+  };
+}
+function openDelVersion(id) {
+  const v = (S.cfg.versions || []).find(x => x.id === id); if (!v) return;
+  openModal("删除版本", "<p>确定删除版本 <b>" + esc(v.label) + "</b> 吗?删除后将无法再与它对比。</p>",
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="dv-ok">删除</button>');
+  $("#dv-ok").onclick = async () => {
+    closeModal(); await Store.del("fc-v-" + id);
+    S.cfg.versions = (S.cfg.versions || []).filter(x => x.id !== id);
+    await Store.set("fc-cfg", S.cfg); S.verCache.delete(id);
+    if (S.dash.cmpId === id) { S.dash.cmp = "latest"; S.dash.cmpId = ""; }
+    rerender(); toast("已删除版本");
+  };
+}
+
+/* =================== 同步 / 备份 / 离线接力 =================== */
+function exportRepFile() {
+  const rep = S.curRep; if (!rep) { toast("请先选择代表"); return; }
+  const doc = S.fcs.get(rep) || ensureDoc(rep);
+  downloadJSON("预估_" + rep.replace(/[\\/:*?"<>|]/g, "_") + "_" + stamp() + ".json", { kind: "fc-rep", exportedAt: Date.now(), doc });
+  toast("已导出「" + rep + "」的预估文件,请发给管理员汇总");
+}
+async function importRepFiles(files) {
+  let ok = 0, skip = 0, bad = 0;
+  for (const f of files) {
+    try {
+      const d = JSON.parse(await f.text());
+      const doc = d && d.kind === "fc-rep" && d.doc;
+      if (!doc || !doc.rep) { bad++; continue; }
+      const old = S.fcs.get(doc.rep);
+      if (old && (old.updatedAt || 0) >= (doc.updatedAt || 0)) { skip++; continue; }
+      S.fcs.set(doc.rep, doc); await Store.set("fc-f-" + doc.rep, doc); ok++;
+    } catch (e) { bad++; }
+  }
+  rerender();
+  toast("合并完成: 更新 " + ok + " 人" + (skip ? " · 跳过 " + skip + "(本机更新)" : "") + (bad ? " · 失败 " + bad : ""));
+}
+async function exportPackage() {
+  if (!S.master) { toast("没有可导出的数据"); return; }
+  const versions = [];
+  for (const v of (S.cfg.versions || [])) { const full = await getVersion(v.id); if (full) versions.push(full); }
+  downloadJSON("预估数据包_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".json",
+    { kind: "fc-package", exportedAt: Date.now(), cfg: S.cfg, master: S.master, forecasts: [...S.fcs.values()], versions });
+  toast("数据包已导出");
+}
+async function importPackage(file) {
+  try {
+    const d = JSON.parse(await file.text());
+    if (d.kind !== "fc-package" || !d.master) { toast("⚠ 不是有效的数据包文件"); return; }
+    await Store.set("fc-cfg", d.cfg); await Store.set("fc-master", d.master);
+    for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
+    for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+    await loadAll(); validateMe(); applyMe(); rerender();
+    if (S.gateOpen) renderGate();
+    toast("✅ 数据包已载入: " + ((d.cfg && d.cfg.cycleLabel) || ""));
+  } catch (e) { toast("⚠ 读取失败: " + (e && e.message || e)); }
+}
+function openClearAll() {
+  openModal("⚠ 清空全部数据",
+    '<p>将删除:导入的主数据、<b>全部代表的预估与备注</b>、全部版本快照与配置。<b style="color:var(--red)">不可恢复。</b></p><p style="margin-top:8px">请输入「清空」两个字确认:</p><input class="ctrl" id="clr-word" style="width:100%;margin-top:6px">',
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="clr-ok">永久清空</button>');
+  $("#clr-ok").onclick = async () => {
+    if ($("#clr-word").value.trim() !== "清空") { toast("输入不匹配"); return; }
+    closeModal(); toast("正在清空 …");
+    for (const k of await Store.list("fc-")) await Store.del(k);
+    S.cfg = null; S.master = null; S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
+    S.curRep = ""; S.dash.cmp = "latest"; S.dash.cmpId = "";
+    if (S.me && S.me.role !== "admin") { S.me = null; if (Store.shared) await Store.pdel("fc-me"); }
+    applyMe(); rerender(); toast("已全部清空");
+  };
+}
+
+/* =================== 管理后台 =================== */
+function renderAdmin() {
+  const host = $("#tab-admin");
+  if (!S.me || S.me.role !== "admin") {
+    host.innerHTML = '<div class="card"><div class="empty"><b>仅管理员可见</b>请点右上角「👤」切换为管理员身份后进入。</div></div>';
+    return;
+  }
+  const cfg = S.cfg, mt = S.master && S.master.meta;
+  const grps = S.master ? [...new Set(S.master.rows.map(r => r.grp))].sort((a, b) => a.localeCompare(b, "zh")) : [];
+  const qset = new Set((cfg && cfg.qtyGroups) || []);
+  const vs = (cfg && cfg.versions) || [];
+  const actSet = new Set((cfg && cfg.actMonths) || []);
+  let h = '<div class="admin-grid">';
+  /* ① 导入 */
+  h += '<div class="card"><div class="card-h"><b>① 每月导入系统数据</b></div><div style="padding:14px 16px;font-size:13px">' +
+    (mt ? "<p>当前数据: <b>" + esc(mt.fileName || "") + '</b><br><span style="color:var(--mute)">' + dt(mt.importedAt) + " 导入 · 明细 " + (mt.srcRows || 0).toLocaleString() + " 行 → " + mt.combos + " 个组合" + (mt.bu ? " · BU: " + esc(mt.bu) : "") + "</span></p>" : '<p style="color:var(--mute)">还没有导入过数据。</p>') +
+    '<p style="color:var(--mute);font-size:12px;margin:8px 0">直接选系统导出的 Excel(detail 明细)。工具自动识别年份、聚合到 代表×省份×产品组、建议关账月份。<b>已填写的预估按 代表+省份+产品组 自动对上,人员/产品变化零手工处理。</b></p>' +
+    '<button class="btn pri" id="ad-import">📂 选择系统导出文件并导入</button></div></div>';
+  /* ② 口径 */
+  h += '<div class="card"><div class="card-h"><b>② 关账月份与周期</b></div><div style="padding:14px 16px;font-size:13px">';
+  if (cfg) {
+    h += '<div class="field" style="margin-bottom:10px"><label>周期标签(顶部显示 + 导出文件名)</label><input class="ctrl" id="cfg-label" style="width:100%" value="' + esc(cfg.cycleLabel || "") + '"></div>' +
+      '<label style="font-size:11.5px;color:var(--mute);font-weight:600">已关账月份(锁定为实际,销售不可填)</label><div style="margin:6px 0 10px">' +
+      MN.map((m, i) => '<span class="chip-toggle' + (actSet.has(i + 1) ? " q" : "") + '" data-cm="' + (i + 1) + '">' + m + (actSet.has(i + 1) ? " ✓" : "") + "</span>").join("") + "</div>" +
+      '<button class="btn pri sm" id="ad-savecfg">保存口径</button>';
+  } else h += '<p style="color:var(--mute)">导入数据后可在这里调整。</p>';
+  h += "</div></div>";
+  /* ③ 版本 */
+  h += '<div class="card"><div class="card-h"><b>③ 版本快照(本次 vs 上次)</b><button class="btn pri sm" id="ad-snap" style="margin-left:auto">＋ 保存当前为新版本</button></div><div style="padding:10px 16px 14px;font-size:13px">';
+  h += vs.length
+    ? '<table class="dt"><thead><tr><th class="l">版本</th><th class="l">保存时间</th><th></th></tr></thead><tbody>' +
+      vs.slice().reverse().map(v => '<tr><td class="l"><b>' + esc(v.label) + '</b></td><td class="l" style="color:var(--mute)">' + dt(v.savedAt) + '</td><td><button class="btn sm danger" data-delv="' + v.id + '">删除</button></td></tr>').join("") +
+      '</tbody></table><p style="color:var(--mute);font-size:12px;margin-top:8px">填写页与看板默认对比<b>最近一个版本</b>;看板也可手动选任意版本。</p>'
+    : '<p style="color:var(--mute)">还没有版本。建议:每次提报截止 → 点「保存当前为新版本」;下次填写时所有页面即显示 Δ 变化。导入新数据时也可勾选自动快照。</p>';
+  h += "</div></div>";
+  /* ④ 产品口径 */
+  h += '<div class="card"><div class="card-h"><b>④ 产品填写口径与单价</b></div><div style="padding:14px 16px;font-size:13px">';
+  if (grps.length) {
+    h += '<p style="color:var(--mute);font-size:12px;margin-bottom:8px">默认按<b>金额(千元)</b>填写。点击某产品组可切换为<b>按数量填写</b>(琥珀色),工具自动按单价折算金额。</p>' +
+      grps.map(g => '<span class="chip-toggle' + (qset.has(g) ? " q" : "") + '" data-qg="' + esc(g) + '">' + esc(g) + (qset.has(g) ? " · 数量" : "") + "</span>").join("");
+    if (qset.size) {
+      const autoAsp = g => {
+        const rs = S.master.rows.filter(r => r.grp === g);
+        const ratio = (ka, kq) => { let A = 0, Q = 0; for (const r of rs) { A += r[ka].reduce((x, y) => x + y, 0); Q += r[kq].reduce((x, y) => x + y, 0); } return Q > 0 ? A / Q : 0; };
+        return ratio("aopA", "aopQ") || ratio("lyA", "lyQ") || ratio("actA", "actQ");
+      };
+      h += '<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">' +
+        '<label style="font-size:11.5px;color:var(--mute);font-weight:600">数量口径产品的单价(元 / 单位)</label>' +
+        '<table class="dt" style="margin-top:6px"><thead><tr><th class="l">产品组</th><th>自动单价</th><th>手动覆盖</th><th>生效单价</th></tr></thead><tbody>' +
+        [...qset].sort((a, b) => a.localeCompare(b, "zh")).map(g => {
+          const auto = autoAsp(g);
+          const ov = num((cfg.aspOverride || {})[g]);
+          const eff = ov > 0 ? ov : auto;
+          return '<tr><td class="l">' + esc(g) + '</td><td class="num">' + (auto > 0 ? Math.round(auto).toLocaleString("zh-CN") : "–") + "</td>" +
+            '<td><input class="ctrl" style="width:110px;text-align:right" placeholder="留空=自动" data-asp="' + esc(g) + '" value="' + (ov > 0 ? ov : "") + '"></td>' +
+            '<td class="num"><b>' + (eff > 0 ? Math.round(eff).toLocaleString("zh-CN") : "–") + "</b></td></tr>";
+        }).join("") + "</tbody></table>" +
+        '<p style="color:var(--mute);font-size:12px;margin-top:6px">自动单价 = AOP 金额÷数量(缺省回退去年 / 今年实际)。改动<b>立即生效</b>:所有按数量填写的行(含已填月份)都会用新单价重新折算金额;系统实际数与 AOP 金额不受影响。</p></div>';
+    }
+  } else h += '<p style="color:var(--mute)">导入数据后这里会列出全部产品组。</p>';
+  h += "</div></div>";
+  /* ⑤ 同步备份 */
+  h += '<div class="card"><div class="card-h"><b>⑤ 数据同步与备份</b></div><div style="padding:14px 16px;font-size:13px">';
+  if (Store.shared) h += "<p>🟢 当前为<b>共享模式</b>:所有人打开同一个发布链接即实时共用一份数据。销售填完,你的看板立即可见,<b>无需任何文件传递</b>。</p>" +
+    '<p style="color:var(--mute);font-size:12px;margin:8px 0">仍建议每次提报截止后导出一份数据包留档。</p><button class="btn sm" id="ad-exppkg">⬇ 导出数据包备份</button>';
+  else h += "<p>💾 当前为<b>本地模式</b>(直接打开 HTML 文件):数据只存在于本页面,关闭即失。用文件接力:</p>" +
+    '<ol class="steps" style="margin:8px 0"><li><b>你</b>:导入系统数据 → <b>导出数据包</b>发给所有销售</li><li><b>销售</b>:打开同一个 HTML → 导入数据包 → 填写 → 在填写页<b>导出我的预估文件</b>发回</li><li><b>你</b>:导入自己的数据包 → <b>导入代表预估文件</b>(可一次多选)→ 看板汇总 / 导出 Excel</li></ol>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" id="ad-exppkg">⬇ 导出数据包</button><button class="btn sm" id="ad-imppkg">📥 导入数据包</button><button class="btn sm" id="ad-impreps">📥 导入代表预估文件(多选)</button></div>';
+  h += "</div></div>";
+  /* ⑥ 安全与权限 */
+  h += '<div class="card"><div class="card-h"><b>⑥ 安全、权限与维护</b></div><div style="padding:14px 16px;font-size:13px">' +
+    '<div class="field" style="margin-bottom:10px"><label>管理 PIN(选择「管理员」身份时需输入;留空 = 不设)</label><div style="display:flex;gap:8px"><input class="ctrl" id="pin-new" style="flex:1" placeholder="例如 0626" value="' + esc((cfg && cfg.adminPin) || "") + '"><button class="btn sm" id="pin-save">保存</button></div></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>经理口令(选择 DSM / RSM 身份时需输入;留空 = 不设)</label><div style="display:flex;gap:8px"><input class="ctrl" id="mgr-new" style="flex:1" placeholder="例如 8888" value="' + esc((cfg && cfg.mgrPin) || "") + '"><button class="btn sm" id="mgr-save">保存</button></div></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
+    '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:可见范围用于防误操作与界面隔离(代表只见自己,DSM 见本团队),非加密级安全;代表选择自己姓名无需口令。</p>' +
+    '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div></div></div>';
+  h += "</div>";
+  /* ⑦ 流程说明 */
+  h += '<div class="card" style="margin-top:16px"><div class="card-h"><b>📖 每月标准流程</b></div><div style="padding:14px 18px"><ol class="steps">' +
+    "<li><b>系统导出</b> detail 明细。任何人员变动、新产品、岗位空缺都<b>不需要</b>预处理。</li>" +
+    "<li>后台<b>①导入</b> → 核对关账月份与周期标签 → 勾选「导入前自动保存版本」。新产品 / 新代表 / 岗位号(如空缺岗位)会<b>自动出现在填写页</b>,无需手工加行、改名。</li>" +
+    "<li>把链接发给团队:每人首次打开<b>选择身份</b>(代表选自己姓名,DSM / RSM 需经理口令)。<b>代表只见自己</b>的填写和汇总;<b>DSM 见本团队</b>并可代填空缺岗位;<b>RSM</b> 按 ⑥ 中设置看全部或本大区;看板与口径条都按身份自动过滤。</li>" +
+    "<li>每人只在自己范围内的蓝色单元格填预估和备注,互不冲突;指标 / 实际 / 他人数据全部只读。</li>" +
+    "<li>提报截止 → <b>③保存版本快照</b>。下月填写时,所有页面自动显示与上一版的 ΔFY / ΔAch / ΔGR。</li>" +
+    "<li>你和老板在<b>看板</b>按 产品 / 省份 / 代表 / DSM / RSM 任意切换,备注永远跟着行走;需要离线汇报点「导出 Excel」(含汇总、全明细、备注清单 3 个 sheet)。</li></ol></div></div>";
+  host.innerHTML = h;
+
+  /* —— 绑定 —— */
+  $("#ad-import").onclick = () => $("#file-xlsx").click();
+  $("#ad-snap").onclick = openSnapModal;
+  if ($("#ad-savecfg")) $("#ad-savecfg").onclick = saveCfgBasics;
+  $$("#tab-admin [data-cm]").forEach(ch => ch.onclick = () => { ch.classList.toggle("q"); ch.textContent = MN[+ch.dataset.cm - 1] + (ch.classList.contains("q") ? " ✓" : ""); });
+  $$("#tab-admin [data-qg]").forEach(ch => ch.onclick = async () => {
+    if (!S.cfg) { toast("请先导入数据"); return; }
+    const g = ch.dataset.qg; const set = new Set(S.cfg.qtyGroups || []);
+    const turnOn = !set.has(g); if (turnOn) set.add(g); else set.delete(g);
+    S.cfg.qtyGroups = [...set]; await Store.set("fc-cfg", S.cfg);
+    renderAdmin(); toast("「" + g + "」" + (turnOn ? "改为按数量填写" : "改回按金额填写"));
+  });
+  $$("#tab-admin [data-delv]").forEach(b => b.onclick = () => openDelVersion(b.dataset.delv));
+  $$("#tab-admin [data-asp]").forEach(inp => inp.onchange = async () => {
+    if (!S.cfg) return;
+    const g = inp.dataset.asp, v = parseFloat(inp.value);
+    S.cfg.aspOverride = S.cfg.aspOverride || {};
+    if (isFinite(v) && v > 0) S.cfg.aspOverride[g] = v; else delete S.cfg.aspOverride[g];
+    await Store.set("fc-cfg", S.cfg);
+    renderAdmin();
+    toast("「" + g + "」单价已" + (isFinite(v) && v > 0 ? "覆盖为 " + Math.round(v).toLocaleString("zh-CN") + " 元" : "恢复自动"));
+  });
+  if ($("#ad-exppkg")) $("#ad-exppkg").onclick = exportPackage;
+  if ($("#ad-imppkg")) $("#ad-imppkg").onclick = () => $("#file-pkg").click();
+  if ($("#ad-impreps")) $("#ad-impreps").onclick = () => $("#file-reps").click();
+  $("#pin-save").onclick = async () => {
+    if (!S.cfg) { toast("请先导入数据再设置 PIN"); return; }
+    S.cfg.adminPin = $("#pin-new").value.trim(); await Store.set("fc-cfg", S.cfg);
+    toast(S.cfg.adminPin ? "已保存管理 PIN" : "已取消管理 PIN");
+  };
+  $("#mgr-save").onclick = async () => {
+    if (!S.cfg) { toast("请先导入数据再设置口令"); return; }
+    S.cfg.mgrPin = $("#mgr-new").value.trim(); await Store.set("fc-cfg", S.cfg);
+    toast(S.cfg.mgrPin ? "已保存经理口令" : "已取消经理口令");
+  };
+  $$("#tab-admin [data-rs]").forEach(b => b.onclick = async () => {
+    if (!S.cfg) { toast("请先导入数据"); return; }
+    S.cfg.rsmScope = b.dataset.rs; await Store.set("fc-cfg", S.cfg);
+    renderAdmin(); toast("RSM 可见范围: " + (b.dataset.rs === "own" ? "仅自己大区" : "全部大区"));
+  });
+  $("#ad-clear").onclick = openClearAll;
+}
+async function saveCfgBasics() {
+  if (!S.cfg) return;
+  const months = []; $$("#tab-admin [data-cm]").forEach(ch => { if (ch.classList.contains("q")) months.push(+ch.dataset.cm); });
+  months.sort((a, b) => a - b);
+  S.cfg.actMonths = months;
+  const lab = $("#cfg-label").value.trim(); if (lab) S.cfg.cycleLabel = lab;
+  await Store.set("fc-cfg", S.cfg);
+  rerender(); toast("口径已保存");
+}
+
+/* =================== 身份选择 =================== */
+function applyMe() {
+  const isAdmin = S.me && S.me.role === "admin";
+  $$(".tabs .tab").forEach(b => { if (b.dataset.tab === "admin") b.style.display = isAdmin ? "" : "none"; });
+  if (!isAdmin && S.tab === "admin") S.tab = "fill";
+  const btn = $("#btn-me");
+  if (btn) btn.textContent = "👤 " + (S.me ? (S.me.role === "admin" ? "管理员" : S.me.name) : "选择身份");
+}
+function validateMe() {
+  if (!S.me || S.me.role === "admin" || !S.master) return;
+  const L = nameLists();
+  const pool = S.me.role === "rep" ? L.reps : S.me.role === "dsm" ? L.dsms : L.rsms;
+  if (!pool.includes(S.me.name)) { S.me = null; if (Store.shared) Store.pdel("fc-me"); }
+}
+function renderGate() {
+  S.gateOpen = true;
+  const hasData = !!S.master;
+  const role = renderGate.cur || (S.me && S.me.role) || "rep";
+  renderGate.cur = role;
+  const L = hasData ? nameLists() : { reps: [], dsms: [], rsms: [] };
+  const names = role === "rep" ? L.reps : role === "dsm" ? L.dsms : role === "rsm" ? L.rsms : [];
+  const needPin = role === "admin" ? !!(S.cfg && S.cfg.adminPin) : (role === "dsm" || role === "rsm") ? !!(S.cfg && S.cfg.mgrPin) : false;
+  let b = '<div class="seg" style="margin-bottom:12px;display:inline-flex">' +
+    [["rep", "销售代表"], ["dsm", "DSM"], ["rsm", "RSM"], ["admin", "管理员·老板"]].map(([k, n]) => '<button data-gr="' + k + '" class="' + (role === k ? "on" : "") + '">' + n + "</button>").join("") + "</div>";
+  if (!hasData) {
+    b += '<p style="font-size:13px;color:var(--ink2)">还没有数据。' +
+      (Store.shared ? "请<b>管理员</b>身份进入后台导入系统导出文件;其他同事等管理员导入后再选择身份。"
+        : "本地模式:管理员请以「管理员·老板」进入后导入;<b>销售同事</b>请先导入管理员发来的数据包:") + "</p>";
+    if (!Store.shared) b += '<button class="btn sm" id="g-import" style="margin:8px 0">📥 导入数据包</button>';
+  } else if (role !== "admin") {
+    b += '<div class="field" style="margin-bottom:10px"><label>我的姓名</label><select class="ctrl" id="g-name" style="width:100%">' +
+      names.map(n => "<option" + (S.me && S.me.name === n ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></div>";
+  }
+  if (needPin) b += '<div class="field" style="margin-bottom:6px"><label>' + (role === "admin" ? "管理 PIN" : "经理口令") + '</label><input type="password" class="ctrl" id="g-pin" style="width:100%"></div>';
+  b += '<p style="font-size:12px;color:var(--mute);margin-top:8px">身份决定可见范围:<b>代表</b>只看自己的填写与汇总;<b>DSM</b> 看本团队;<b>RSM</b> 看' +
+    ((S.cfg && S.cfg.rsmScope === "own") ? "本大区" : "全部") + ";<b>管理员</b>看全部并可进入后台。" +
+    (Store.shared ? "选择会记在你自己的设备上,下次自动进入。" : "") + "</p>";
+  const foot = (S.me ? '<button class="btn" id="g-cancel">取消</button>' : "") + '<button class="btn pri" id="g-ok">进入</button>';
+  openModal("选择身份", b, foot);
+  $$("#modal [data-gr]").forEach(btn => btn.onclick = () => { renderGate.cur = btn.dataset.gr; renderGate(); });
+  if ($("#g-import")) $("#g-import").onclick = () => $("#file-pkg").click();
+  if ($("#g-cancel")) $("#g-cancel").onclick = () => { S.gateOpen = false; renderGate.cur = null; closeModal(); };
+  $("#g-ok").onclick = async () => {
+    if (!hasData && role !== "admin") { toast("暂无人员名单,请先由管理员导入数据"); return; }
+    if (needPin && $("#g-pin").value !== (role === "admin" ? S.cfg.adminPin : S.cfg.mgrPin)) { toast((role === "admin" ? "管理 PIN" : "经理口令") + "不正确"); return; }
+    const name = role === "admin" ? "管理员" : ($("#g-name") ? $("#g-name").value : "");
+    if (role !== "admin" && !name) { toast("请选择姓名"); return; }
+    S.me = { role, name };
+    if (role === "rep") S.curRep = name;
+    else if (S.curRep && !scopeReps().includes(S.curRep)) S.curRep = "";
+    if (Store.shared) await Store.pset("fc-me", S.me);
+    S.gateOpen = false; renderGate.cur = null; closeModal(); applyMe();
+    if (!S.master && role === "admin") switchTab("admin"); else rerender();
+    toast("已进入:" + scopeLabel());
+  };
+}
+
+/* =================== 入口 =================== */
+function rerender() {
+  const bu = S.master && S.master.meta && S.master.meta.bu;
+  $("#bu-tag").textContent = (bu ? bu + " · " : "") + "月度滚动预估";
+  renderCtx();
+  if (S.tab === "fill") renderFill(); else if (S.tab === "dash") renderDash(); else renderAdmin();
+}
+function switchTab(t) {
+  if (t === "admin" && !(S.me && S.me.role === "admin")) { renderGate(); return; }
+  S.tab = t;
+  $$(".tabs .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("#tab-fill").style.display = t === "fill" ? "" : "none";
+  $("#tab-dash").style.display = t === "dash" ? "" : "none";
+  $("#tab-admin").style.display = t === "admin" ? "" : "none";
+  rerender();
+}
+/* 表格列宽拖拽 */
+function initResizableTable(table) {
+  if (!table) return;
+  const ths = table.querySelectorAll("thead th");
+  ths.forEach((th, idx) => {
+    if (th.querySelector(".resize-handle")) return;
+    const handle = document.createElement("div");
+    handle.className = "resize-handle";
+    th.appendChild(handle);
+    let startX, startWidth, colIdx = idx;
+    handle.addEventListener("mousedown", e => {
+      e.preventDefault();
+      handle.classList.add("dragging");
+      startX = e.pageX;
+      startWidth = th.offsetWidth;
+      const onMove = ev => {
+        const newWidth = startWidth + (ev.pageX - startX);
+        const w = Math.max(50, newWidth) + "px";
+        th.style.width = w;
+        th.style.minWidth = w;
+        // 同步调整该列所有单元格
+        const rows = table.querySelectorAll("tbody tr, tfoot tr");
+        rows.forEach(row => {
+          const cell = row.children[colIdx];
+          if (cell) { cell.style.width = w; cell.style.minWidth = w; }
+        });
+      };
+      const onUp = () => {
+        handle.classList.remove("dragging");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
+async function init() {
+  await Store.init();
+  /* 初始化水印 */
+  const wm = $("#watermark");
+  if (wm) {
+    const text = "Designed by Kong, 仅波士顿科学内部使用";
+    const w = window.innerWidth, h = window.innerHeight;
+    const stepX = 280, stepY = 200;
+    let s = "";
+    for (let y = -100; y < h + 100; y += stepY) {
+      for (let x = -100; x < w + 100; x += stepX) {
+        s += '<span style="left:' + x + 'px;top:' + y + 'px">' + text + '</span>';
+      }
+    }
+    wm.innerHTML = s;
+  }
+  const b = $("#sync-badge");
+  if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
+  else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本次打开的页面中;请用管理后台的数据包导出/导入接力"; }
+  await loadAll();
+  if (Store.shared) { S.me = await Store.pget("fc-me"); validateMe(); }
+  if (S.me && S.me.role === "rep") S.curRep = S.me.name;
+  $$(".tabs .tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
+  $("#btn-me").onclick = () => renderGate();
+  $("#btn-refresh").onclick = async () => { toast("正在刷新 …"); await loadAll(); validateMe(); applyMe(); rerender(); if (!S.me) renderGate(); else toast("已读取最新数据"); };
+  $("#mask").addEventListener("click", e => { if (S.gateOpen) return; if (e.target === $("#mask")) closeModal(); });
+  $("#file-xlsx").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onXlsxFile(f); });
+  $("#file-pkg").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) importPackage(f); });
+  $("#file-reps").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importRepFiles(fs); });
+  applyMe();
+  rerender();
+  if (!S.me) renderGate();
+}
+init();
+</script>
+</body>
+</html>
