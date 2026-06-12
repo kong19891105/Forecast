@@ -479,6 +479,22 @@ const Store = {
   async pdel(k) { if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} } else delete this.mem["p:" + k]; }
 };
 
+/* =================== 密码管理 (独立存储,云端同步不覆盖) =================== */
+// 密码存储在独立的 fc-passwords key 中,云同步时绝不覆盖
+const Passwords = {
+  _cache: null, _loaded: false,
+  async _load() { if (this._loaded) return; this._cache = await Store.get("fc-passwords") || {}; this._loaded = true; },
+  async getAdminPin() { await this._load(); return this._cache.adminPin || ""; },
+  async setAdminPin(v) { await this._load(); if (v) this._cache.adminPin = v; else delete this._cache.adminPin; await Store.set("fc-passwords", this._cache); },
+  async getMgrPin() { await this._load(); return this._cache.mgrPin || ""; },
+  async setMgrPin(v) { await this._load(); if (v) this._cache.mgrPin = v; else delete this._cache.mgrPin; await Store.set("fc-passwords", this._cache); },
+  async getPersonalPin(role, name) { await this._load(); return (this._cache.pins && this._cache.pins[role] && this._cache.pins[role][name]) || ""; },
+  async setPersonalPin(role, name, v) { await this._load(); if (!this._cache.pins) this._cache.pins = {}; if (!this._cache.pins[role]) this._cache.pins[role] = {}; if (v) this._cache.pins[role][name] = v; else { delete this._cache.pins[role][name]; if (!Object.keys(this._cache.pins[role]).length) delete this._cache.pins[role]; if (!Object.keys(this._cache.pins).length) delete this._cache.pins; } await Store.set("fc-passwords", this._cache); },
+  async getAllPins() { await this._load(); return this._cache.pins || {}; },
+  async export() { await this._load(); return JSON.parse(JSON.stringify(this._cache)); },
+  async importIfEmpty(pw) { await this._load(); if (!this._cache.adminPin && !this._cache.mgrPin && !this._cache.pins && pw) { this._cache = JSON.parse(JSON.stringify(pw)); if (JSON.stringify(this._cache) !== "{}") await Store.set("fc-passwords", this._cache); } }
+};
+
 /* =================== 全局状态 =================== */
 const S = {
   cfg: null,
@@ -1486,9 +1502,10 @@ async function commitImport() {
   closeModal(); toast("正在写入数据 …");
   if (doSnap) await buildSnapshot((S.cfg.cycleLabel || "上一版") + " · 导入前快照");
   const old = S.cfg || {};
+  // 密码独立存储在 Passwords,不放入 cfg
   const cfg = { cycleLabel: label, cy: p.C.cy, ly: p.C.ly, actMonths: months,
-    qtyGroups: old.qtyGroups || [], aspOverride: old.aspOverride || {}, adminPin: old.adminPin || "",
-    mgrPin: old.mgrPin || "", pins: old.pins || {}, rsmScope: old.rsmScope || "all", versions: old.versions || [] };
+    qtyGroups: old.qtyGroups || [], aspOverride: old.aspOverride || {},
+    rsmScope: old.rsmScope || "all", versions: old.versions || [] };
   const master = { meta: { importedAt: Date.now(), fileName: p.fileName, sheet: p.sheet, srcRows: p.agg.used, combos: p.agg.rows.length, bu: p.agg.bu || "" }, rows: p.agg.rows };
   const ok1 = await Store.set("fc-master", master), ok2 = await Store.set("fc-cfg", cfg);
   S.pendingImport = null;
@@ -1560,8 +1577,9 @@ async function exportPackage() {
   if (!S.master) { toast("没有可导出的数据"); return; }
   const versions = [];
   for (const v of (S.cfg.versions || [])) { const full = await getVersion(v.id); if (full) versions.push(full); }
+  const pw = await Passwords.export();
   downloadJSON("预估数据包_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".json",
-    { kind: "fc-package", exportedAt: Date.now(), cfg: S.cfg, master: S.master, forecasts: [...S.fcs.values()], versions });
+    { kind: "fc-package", exportedAt: Date.now(), cfg: S.cfg, master: S.master, forecasts: [...S.fcs.values()], versions, passwords: pw });
   toast("数据包已导出");
 }
 async function importPackage(file) {
@@ -1574,6 +1592,7 @@ async function importPackage(file) {
     await Store.set("fc-cfg", d.cfg); await Store.set("fc-master", d.master);
     for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
     for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+    if (d.passwords) await Passwords.importIfEmpty(d.passwords);
     await loadAll(); validateMe(); applyMe(); rerender();
     if (S.gateOpen) renderGate();
     toast("✅ 数据包已载入: " + ((d.cfg && d.cfg.cycleLabel) || ""));
@@ -1590,6 +1609,7 @@ function openClearAll() {
     if ($("#clr-word").value.trim() !== "清空") { toast("输入不匹配"); return; }
     closeModal(); toast("正在清空 …");
     for (const k of await Store.list("fc-")) await Store.del(k);
+    Passwords._cache = {}; Passwords._loaded = true; await Store.set("fc-passwords", {});
     S.cfg = null; S.master = null; S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
     S.curRep = ""; S.dash.cmp = "latest"; S.dash.cmpId = "";
     if (S.me && S.me.role !== "admin") { S.me = null; if (Store.shared) await Store.pdel("fc-me"); }
@@ -1668,13 +1688,13 @@ function renderAdmin() {
   h += "</div></div>";
   /* ⑥ 安全与权限 */
   h += '<div class="card"><div class="card-h"><b>⑥ 安全、权限与维护</b></div><div style="padding:14px 16px;font-size:13px">' +
-    '<div class="field" style="margin-bottom:10px"><label>管理 PIN(管理员登录时需要;留空 = 任何人都能进)</label><div style="display:flex;gap:8px"><input class="ctrl" id="pin-new" style="flex:1" placeholder="例如 0626" value="' + esc((cfg && cfg.adminPin) || "") + '"><button class="btn sm" id="pin-save">保存</button></div></div>' +
-    '<div class="field" style="margin-bottom:10px"><label>经理通用口令(DSM/RSM 登录时需要,作为每人未单独设密码时的默认值;留空 = 不设)</label><div style="display:flex;gap:8px"><input class="ctrl" id="mgr-new" style="flex:1" placeholder="例如 8888" value="' + esc((cfg && cfg.mgrPin) || "") + '"><button class="btn sm" id="mgr-save">保存</button></div></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>管理 PIN(管理员登录时需要;留空 = 任何人都能进)</label><div style="display:flex;gap:8px"><input class="ctrl" id="pin-new" style="flex:1" placeholder="例如 0626"><button class="btn sm" id="pin-save">保存</button></div></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>经理通用口令(DSM/RSM 登录时需要,作为每人未单独设密码时的默认值;留空 = 不设)</label><div style="display:flex;gap:8px"><input class="ctrl" id="mgr-new" style="flex:1" placeholder="例如 8888"><button class="btn sm" id="mgr-save">保存</button></div></div>' +
     '<div style="margin:12px 0;border-top:1px dashed var(--line);padding-top:10px">' +
     '<label style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:8px;display:block">👤 个人角色密码(可选 — 给某个 DSM/RSM 单独设置密码,其他人仍用上面通用口令)</label>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:6px;font-size:11.5px;color:var(--mute);margin-bottom:4px"><span>姓名</span><span>角色</span><span>密码(留空=用通用口令)</span></div>' +
     '<div id="personal-pins"></div>' +
-    '<button class="btn sm" id="add-personal-pin" style="margin-top:6px">＋ 添加个人密码</button>' +
+    '<button class="btn sm" id="add-personal-pin" style="margin-top:6px">＋ 添加个人密码(在输入框中填写后失焦即自动保存)</button>' +
     '</div>' +
     '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:代表不需要密码;DSM/RSM 先检查是否设置了个人密码,有则用个人密码,无则用上面通用口令。所有密码保存在本地浏览器,云端同步后团队成员各自生效。</p>' +
@@ -1717,13 +1737,15 @@ function renderAdmin() {
   if ($("#ad-impreps")) $("#ad-impreps").onclick = () => $("#file-reps").click();
   $("#pin-save").onclick = async () => {
     if (!S.cfg) { toast("请先导入数据再设置 PIN"); return; }
-    S.cfg.adminPin = $("#pin-new").value.trim(); await Store.set("fc-cfg", S.cfg);
-    toast(S.cfg.adminPin ? "已保存管理 PIN" : "已取消管理 PIN");
+    const v = $("#pin-new").value.trim();
+    await Passwords.setAdminPin(v);
+    toast(v ? "已保存管理 PIN" : "已取消管理 PIN");
   };
   $("#mgr-save").onclick = async () => {
     if (!S.cfg) { toast("请先导入数据再设置口令"); return; }
-    S.cfg.mgrPin = $("#mgr-new").value.trim(); await Store.set("fc-cfg", S.cfg);
-    toast(S.cfg.mgrPin ? "已保存经理口令" : "已取消经理口令");
+    const v = $("#mgr-new").value.trim();
+    await Passwords.setMgrPin(v);
+    toast(v ? "已保存经理口令" : "已取消经理口令");
   };
   $$("#tab-admin [data-rs]").forEach(b => b.onclick = async () => {
     if (!S.cfg) { toast("请先导入数据"); return; }
@@ -1743,10 +1765,9 @@ async function saveCfgBasics() {
   rerender(); toast("口径已保存");
 }
 
-function renderPersonalPins() {
+async function renderPersonalPins() {
   const el = $("#personal-pins"); if (!el) return;
-  const pins = ((S.cfg && S.cfg.pins) || {});
-  const allNames = S.master ? [...new Set([...S.idx.values()].map(r => r.rep))].sort((a,b) => a.localeCompare(b, "zh")) : [];
+  const pins = await Passwords.getAllPins();
   const dsms = [...new Set([...S.idx.values()].map(r => r.dsm).filter(Boolean))].sort((a,b) => a.localeCompare(b, "zh"));
   const rsms = [...new Set([...S.idx.values()].map(r => r.rsm).filter(Boolean))].sort((a,b) => a.localeCompare(b, "zh"));
   
@@ -1765,17 +1786,12 @@ function renderPersonalPins() {
   if (!h) h = '<span style="color:var(--mute);font-size:12px">导入数据后这里会列出所有 DSM/RSM,可为每人单独设密码。</span>';
   el.innerHTML = h;
   
-  // 绑定输入事件
+  // 绑定输入事件 — 保存到 Passwords 独立存储
   $$("#personal-pins input[data-ppin-role]").forEach(inp => {
     inp.onchange = async () => {
-      if (!S.cfg) return;
       const role = inp.dataset.ppinRole, name = inp.dataset.ppinName;
-      S.cfg.pins = S.cfg.pins || {};
-      S.cfg.pins[role] = S.cfg.pins[role] || {};
       const v = inp.value.trim();
-      if (v) S.cfg.pins[role][name] = v;
-      else { delete S.cfg.pins[role][name]; if (!Object.keys(S.cfg.pins[role]).length) delete S.cfg.pins[role]; if (!Object.keys(S.cfg.pins).length) delete S.cfg.pins; }
-      await Store.set("fc-cfg", S.cfg);
+      await Passwords.setPersonalPin(role, name, v);
       toast(v ? esc(name) + " 已设置 " + (role === "dsm" ? "DSM" : "RSM") + " 个人密码" : esc(name) + " 已取消个人密码");
     };
   });
@@ -1795,21 +1811,19 @@ function validateMe() {
   const pool = S.me.role === "rep" ? L.reps : S.me.role === "dsm" ? L.dsms : L.rsms;
   if (!pool.includes(S.me.name)) { S.me = null; Store.pdel("fc-me"); }
 }
-function renderGate() {
+async function renderGate() {
   S.gateOpen = true;
   const hasData = !!S.master;
   const role = renderGate.cur || (S.me && S.me.role) || "rep";
   renderGate.cur = role;
   const L = hasData ? nameLists() : { reps: [], dsms: [], rsms: [] };
   const names = role === "rep" ? L.reps : role === "dsm" ? L.dsms : role === "rsm" ? L.rsms : [];
-  // 每人独立密码：pinMap[role][name] 或全局回退 mgrPin/adminPin
-  const pins = (S.cfg && S.cfg.pins) || {};
-  const rolePin = role === "admin" ? S.cfg && S.cfg.adminPin
-    : role === "rep" ? undefined   // rep 默认无密码
-    : (S.cfg && S.cfg.mgrPin);     // dsm/rsm 全局口令，仅当每人未单独设密码时用
+  // 每人独立密码：Passwords 独立存储,云端同步不覆盖
   const nameStr = role !== "admin" ? ($("#g-name") ? $("#g-name").value : "") : "";
-  const personalPin = (pins[role] && pins[role][nameStr]) || undefined;
-  const needPin = role === "admin" ? !!rolePin : (personalPin !== undefined ? true : !!rolePin);
+  const personalPin = (role === "dsm" || role === "rsm") && nameStr ? await Passwords.getPersonalPin(role, nameStr) : undefined;
+  const adminPin = role === "admin" ? await Passwords.getAdminPin() : undefined;
+  const mgrPin = (role === "dsm" || role === "rsm") ? await Passwords.getMgrPin() : undefined;
+  const needPin = role === "admin" ? !!adminPin : (personalPin ? true : !!mgrPin);
   let b = '<div class="seg" style="margin-bottom:12px;display:inline-flex">' +
     [["rep", "销售代表"], ["dsm", "DSM"], ["rsm", "RSM"], ["admin", "管理员·老板"]].map(([k, n]) => '<button data-gr="' + k + '" class="' + (role === k ? "on" : "") + '">' + n + "</button>").join("") + "</div>";
   if (!hasData) {
@@ -1822,7 +1836,7 @@ function renderGate() {
       names.map(n => "<option" + (S.me && S.me.name === n ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></div>";
   }
   if (needPin) {
-    const pinLabel = role === "admin" ? "管理 PIN" : (personalPin !== undefined ? esc(nameStr) + " 的登录密码" : "经理口令");
+    const pinLabel = role === "admin" ? "管理 PIN" : (personalPin ? esc(nameStr) + " 的登录密码" : "经理口令");
     b += '<div class="field" style="margin-bottom:6px"><label>' + pinLabel + '</label><input type="password" class="ctrl" id="g-pin" style="width:100%"></div>';
   }
   b += '<p style="font-size:12px;color:var(--mute);margin-top:8px">身份决定可见范围:<b>代表</b>只看自己的填写与汇总;<b>DSM</b> 看本团队;<b>RSM</b> 看' +
@@ -1836,7 +1850,7 @@ function renderGate() {
   $("#g-ok").onclick = async () => {
     if (!hasData && role !== "admin") { toast("暂无人员名单,请先由管理员导入数据"); return; }
     if (needPin) {
-      const correctPin = personalPin !== undefined ? personalPin : (role === "admin" ? S.cfg.adminPin : S.cfg.mgrPin);
+      const correctPin = personalPin || (role === "admin" ? adminPin : mgrPin);
       if ($("#g-pin").value !== correctPin) { toast("密码不正确"); return; }
     }
     const name = role === "admin" ? "管理员" : ($("#g-name") ? $("#g-name").value : "");
@@ -1954,6 +1968,8 @@ async function cloudPull(force) {
     return false;
   }
   await loadAll(); validateMe(); applyMe();
+  // 密码存在独立 key fc-passwords 中,云端同步不覆盖
+  Passwords._loaded = false; await Passwords._load();
   const label = (d.cfg && d.cfg.cycleLabel) || "云端数据";
   toast("✅ 已同步云端数据: " + label + " (" + new Date(d.exportedAt).toLocaleString("zh-CN") + ")");
   return true;
