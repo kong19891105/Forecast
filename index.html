@@ -425,7 +425,7 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
    — 修改下面的 CLOUD_URL 为你的 GitHub 数据包 Raw URL 即可启用云端 —
    ===================================================================== */
 // ★ 改为你的 GitHub 数据包 Raw URL（以 https://raw.githubusercontent.com/ 开头）
-const CLOUD_URL = "https://github.com/kong19891105/Forecast/blob/main/data.json";
+const CLOUD_URL = "";
 "use strict";
 const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const $  = s => document.querySelector(s);
@@ -1566,15 +1566,21 @@ async function exportPackage() {
 }
 async function importPackage(file) {
   try {
-    const d = JSON.parse(await file.text());
-    if (d.kind !== "fc-package" || !d.master) { toast("⚠ 不是有效的数据包文件"); return; }
+    const raw = await file.text();
+    let d;
+    try { d = JSON.parse(raw); } catch (pe) { toast("⚠ JSON 解析失败,文件可能不是有效 JSON: " + pe.message); return; }
+    if (!d || !d.kind || d.kind !== "fc-package") { toast("⚠ 文件格式不对 (缺少 kind='fc-package'),请确认是「管理后台 → 导出数据包」生成的 JSON 文件"); return; }
+    if (!d.master) { toast("⚠ 数据包缺少主数据(master),可能导出时数据未加载"); return; }
     await Store.set("fc-cfg", d.cfg); await Store.set("fc-master", d.master);
     for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
     for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
     await loadAll(); validateMe(); applyMe(); rerender();
     if (S.gateOpen) renderGate();
     toast("✅ 数据包已载入: " + ((d.cfg && d.cfg.cycleLabel) || ""));
-  } catch (e) { toast("⚠ 读取失败: " + (e && e.message || e)); }
+  } catch (e) {
+    console.error("importPackage:", e);
+    toast("⚠ 写入存储失败: " + (e && e.message || e) + " — 可能是存储空间满了,试试清空数据后重试");
+  }
 }
 function openClearAll() {
   openModal("⚠ 清空全部数据",
@@ -1844,29 +1850,51 @@ function initResizableTable(table) {
 function cloudMode() { return !!CLOUD_URL; }
 async function cloudFetch(silent) {
   if (!cloudMode()) return null;
-  try {
-    const resp = await fetch(CLOUD_URL + "?t=" + Date.now(), { cache: "no-store" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const d = await resp.json();
-    if (d.kind !== "fc-package" || !d.master) throw new Error("格式无效");
-    return d;
-  } catch (e) {
-    if (!silent) toast("⚠ 云端数据拉取失败: " + (e.message || e));
-    console.error("cloudFetch:", e);
-    return null;
+  // 自动生成 CDN 回退 URL：把 raw.githubusercontent.com 替换为 jsdelivr CDN
+  const urls = [CLOUD_URL];
+  if (CLOUD_URL.includes("raw.githubusercontent.com")) {
+    // jsDelivr: https://cdn.jsdelivr.net/gh/用户名/仓库名@分支/路径
+    const m = CLOUD_URL.match(/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)/);
+    if (m) urls.push("https://cdn.jsdelivr.net/gh/" + m[1] + "/" + m[2] + "@" + m[3] + "/" + m[4]);
   }
+  let lastErr = "";
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, { cache: "no-store" });
+          if (resp.ok) {
+        const d = await resp.json();
+        if (!d || d.kind !== "fc-package") throw new Error("JSON 格式不符 (kind != fc-package)");
+        if (!d.master) throw new Error("JSON 缺少 master 字段");
+        if (url !== CLOUD_URL) console.log("cloudFetch: 通过 CDN 拉取成功");
+        return d;
+      }
+      lastErr = "HTTP " + resp.status + (resp.status === 404 ? " (文件不存在)" : resp.status === 403 ? " (仓库需设为公开 Public)" : "");
+    } catch (e) {
+      lastErr = (e.message || e);
+    }
+  }  // end URL loop
+  if (!silent) {
+    toast("☁ 拉取失败: " + lastErr + " — raw.githubusercontent.com 国内被墙,已尝试 CDN 回退");
+    console.error("cloudFetch failed:", lastErr);
+  }
+  return null;
 }
 async function cloudPull(force) {
-  if (!cloudMode()) return false;
+  if (!cloudMode()) { toast("⚠ CLOUD_URL 为空,请在代码中配置数据包 Raw URL"); return false; }
   const localMeta = await Store.get("fc-master");
   // 仅当本地无数据（首次打开）时自动拉取；force=true 可强制拉取
   if (!force && localMeta) return false;
-  const d = await cloudFetch(false);
+  const d = await cloudFetch(!force);  // 手动同步(silent=false)显示详细错误
   if (!d) return false;
-  await Store.set("fc-cfg", d.cfg);
-  await Store.set("fc-master", d.master);
-  for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
-  for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+  try {
+    await Store.set("fc-cfg", d.cfg);
+    await Store.set("fc-master", d.master);
+    for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
+    for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+  } catch (e) {
+    toast("⚠ 数据写入失败,可能超出浏览器存储上限: " + (e.message || e));
+    return false;
+  }
   await loadAll(); validateMe(); applyMe();
   const label = (d.cfg && d.cfg.cycleLabel) || "云端数据";
   toast("✅ 已同步云端数据: " + label + " (" + new Date(d.exportedAt).toLocaleString("zh-CN") + ")");
