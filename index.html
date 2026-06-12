@@ -424,9 +424,9 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
    ③ 本地 HTML 文件           → localStorage 持久化 + 数据包文件接力
    — 修改下面的 CLOUD_URL 为你的 GitHub 数据包 Raw URL 即可启用云端 —
    ===================================================================== */
+"use strict";
 // ★ 改为你的 GitHub 数据包 Raw URL（以 https://raw.githubusercontent.com/ 开头）
 const CLOUD_URL = "https://raw.githubusercontent.com/kong19891105/Forecast/refs/heads/main/data.json";
-"use strict";
 const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -450,49 +450,102 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
 
 /* =================== 存储适配层 =================== */
+// 共享模式(Claude Artifact)用 window.storage;本地/云端模式用 localStorage 持久化,
+// localStorage 不可用时(极少数浏览器隐私模式)退回内存。
 const Store = {
   shared: false,
   mem: {},
-  async init() { try { if (window.storage && typeof window.storage.get === "function") { await window.storage.list("fc-", true); this.shared = true; } } catch (e) { this.shared = false; } },
+  ls: null,
+  async init() {
+    try { if (window.storage && typeof window.storage.get === "function") { await window.storage.list("fc-", true); this.shared = true; } } catch (e) { this.shared = false; }
+    if (!this.shared) { try { const t = "__fc_t__"; localStorage.setItem(t, "1"); localStorage.removeItem(t); this.ls = localStorage; } catch (e) { this.ls = null; } }
+  },
+  _lsGet(k) { try { const v = this.ls.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
+  _lsSet(k, v) { try { this.ls.setItem(k, JSON.stringify(v)); return true; } catch (e) { console.error(e); toast("⚠ 本地存储写入失败(可能空间已满)"); return false; } },
   async get(k) {
     if (this.shared) { try { const r = await window.storage.get(k, true); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    if (this.ls) return this._lsGet("fcv5:" + k);
     return this.mem[k] !== undefined ? this.mem[k] : null;
   },
   async set(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), true); return !!r; } catch (e) { console.error(e); toast("⚠ 共享存储写入失败"); return false; } }
+    if (this.ls) return this._lsSet("fcv5:" + k, v);
     this.mem[k] = JSON.parse(JSON.stringify(v)); return true;
   },
-  async del(k) { if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} } else delete this.mem[k]; },
+  async del(k) {
+    if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} }
+    else if (this.ls) { try { this.ls.removeItem("fcv5:" + k); } catch (e) {} }
+    else delete this.mem[k];
+  },
   async list(prefix) {
     if (this.shared) { try { const r = await window.storage.list(prefix, true); return (r && r.keys) ? r.keys.map(x => typeof x === "string" ? x : x.key) : []; } catch (e) { return []; } }
+    if (this.ls) { const out = []; const p = "fcv5:" + prefix; for (let i = 0; i < this.ls.length; i++) { const k = this.ls.key(i); if (k && k.startsWith(p)) out.push(k.slice(5)); } return out; }
     return Object.keys(this.mem).filter(k => k.startsWith(prefix));
   },
   /* 个人空间(shared=false): 每个使用者各自一份,用于记住身份 */
   async pget(k) {
     if (this.shared) { try { const r = await window.storage.get(k, false); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    if (this.ls) return this._lsGet("fcv5p:" + k);
     return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
   },
   async pset(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), false); return !!r; } catch (e) { return false; } }
+    if (this.ls) return this._lsSet("fcv5p:" + k, v);
     this.mem["p:" + k] = JSON.parse(JSON.stringify(v)); return true;
   },
-  async pdel(k) { if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} } else delete this.mem["p:" + k]; }
+  async pdel(k) {
+    if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} }
+    else if (this.ls) { try { this.ls.removeItem("fcv5p:" + k); } catch (e) {} }
+    else delete this.mem["p:" + k];
+  }
 };
 
-/* =================== 密码管理 (独立存储,云端同步不覆盖) =================== */
-// 密码存储在独立的 fc-passwords key 中,云同步时绝不覆盖
+/* =================== 密码管理 =================== */
+// 密码以 SHA-256 哈希形式存在独立的 fc-passwords key 中(兼容历史明文,首次验证成功后自动升级为哈希)。
+// 带 updatedAt 时间戳:导出数据包时一并带出;导入/云端拉取时,云端密码比本地新才覆盖,
+// 这样管理员改密码 → 导出上传 GitHub → 团队成员打开页面即生效,而管理员本机最新设置不会被旧包冲掉。
+async function sha256(str) {
+  try {
+    if (crypto && crypto.subtle) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch (e) {}
+  // 回退:非安全上下文(如某些 http 环境)用简易散列,仍避免明文落盘
+  let h1 = 0x811c9dc5, h2 = 0x1000193;
+  for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = Math.imul(h2 + c, 2654435761) >>> 0; }
+  return "fb" + h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
+}
+const isHash = v => typeof v === "string" && (/^[0-9a-f]{64}$/.test(v) || /^fb[0-9a-f]{16}$/.test(v));
 const Passwords = {
   _cache: null, _loaded: false,
   async _load() { if (this._loaded) return; this._cache = await Store.get("fc-passwords") || {}; this._loaded = true; },
+  async _save() { this._cache.updatedAt = Date.now(); await Store.set("fc-passwords", this._cache); },
   async getAdminPin() { await this._load(); return this._cache.adminPin || ""; },
-  async setAdminPin(v) { await this._load(); if (v) this._cache.adminPin = v; else delete this._cache.adminPin; await Store.set("fc-passwords", this._cache); },
+  async setAdminPin(v) { await this._load(); if (v) this._cache.adminPin = await sha256(v); else delete this._cache.adminPin; await this._save(); },
   async getMgrPin() { await this._load(); return this._cache.mgrPin || ""; },
-  async setMgrPin(v) { await this._load(); if (v) this._cache.mgrPin = v; else delete this._cache.mgrPin; await Store.set("fc-passwords", this._cache); },
+  async setMgrPin(v) { await this._load(); if (v) this._cache.mgrPin = await sha256(v); else delete this._cache.mgrPin; await this._save(); },
   async getPersonalPin(role, name) { await this._load(); return (this._cache.pins && this._cache.pins[role] && this._cache.pins[role][name]) || ""; },
-  async setPersonalPin(role, name, v) { await this._load(); if (!this._cache.pins) this._cache.pins = {}; if (!this._cache.pins[role]) this._cache.pins[role] = {}; if (v) this._cache.pins[role][name] = v; else { delete this._cache.pins[role][name]; if (!Object.keys(this._cache.pins[role]).length) delete this._cache.pins[role]; if (!Object.keys(this._cache.pins).length) delete this._cache.pins; } await Store.set("fc-passwords", this._cache); },
+  async setPersonalPin(role, name, v) { await this._load(); if (!this._cache.pins) this._cache.pins = {}; if (!this._cache.pins[role]) this._cache.pins[role] = {}; if (v) this._cache.pins[role][name] = await sha256(v); else { delete this._cache.pins[role][name]; if (!Object.keys(this._cache.pins[role]).length) delete this._cache.pins[role]; if (!Object.keys(this._cache.pins).length) delete this._cache.pins; } await this._save(); },
   async getAllPins() { await this._load(); return this._cache.pins || {}; },
+  /* 校验输入是否匹配已存密码;兼容旧版明文存储 */
+  async verify(input, stored) {
+    if (!stored) return true;
+    if (isHash(stored)) return (await sha256(input)) === stored;
+    return input === stored; // 历史明文
+  },
   async export() { await this._load(); return JSON.parse(JSON.stringify(this._cache)); },
-  async importIfEmpty(pw) { await this._load(); if (!this._cache.adminPin && !this._cache.mgrPin && !this._cache.pins && pw) { this._cache = JSON.parse(JSON.stringify(pw)); if (JSON.stringify(this._cache) !== "{}") await Store.set("fc-passwords", this._cache); } }
+  /* 数据包/云端的密码应用:本地为空,或包内更新时间更晚 → 覆盖本地 */
+  async applyFromPackage(pw) {
+    if (!pw || typeof pw !== "object") return;
+    await this._load();
+    const localEmpty = !this._cache.adminPin && !this._cache.mgrPin && !this._cache.pins;
+    const newer = (pw.updatedAt || 0) > (this._cache.updatedAt || 0);
+    if (localEmpty || newer) {
+      this._cache = JSON.parse(JSON.stringify(pw));
+      await Store.set("fc-passwords", this._cache); // 保留包内 updatedAt,不走 _save()
+    }
+  }
 };
 
 /* =================== 全局状态 =================== */
@@ -755,19 +808,39 @@ function rollup(entries, dimF) {
   }
   return [...m.values()].sort((a, b) => b.aop - a.aop || b.fy - a.fy);
 }
-/* 历史版本快照按同维度汇总 */
-function rollupVer(ver, dimKey, filterRsm) {
+/* 历史版本快照按同维度汇总(期间感知;快照里已关账月份存的是 null,用实际数回填保证口径可比) */
+function rollupVer(ver, dimKey, filterRsm, ms) {
   const m = new Map(); if (!ver) return m;
+  ms = ms || PERIODS[6].months;
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
   for (const k in ver.rows) {
     const v = ver.rows[k];
     if (filterRsm && (v.rsm || "") !== filterRsm) continue;
     const dk = dimKey === "grp" ? v.grp : dimKey === "prov" ? v.prov : dimKey === "rep" ? v.rep : dimKey === "dsm" ? (v.dsm || "未分配") : (v.rsm || "未分配");
     let o = m.get(dk); if (!o) { o = { fy: 0, fyq: 0, aop: 0, ly: 0 }; m.set(dk, o); }
-    o.fy += v.fy; o.fyq += v.fyq || 0; o.aop += v.aop; o.ly += v.ly;
+    let fy = 0;
+    for (const i of ms) {
+      const x = v.m ? v.m[i] : null;
+      if (x != null) fy += x;
+      else if (actSet.has(i + 1)) { const r = S.idx.get(k); if (r) fy += r.actA[i]; }
+    }
+    o.fy += fy; o.fyq += v.fyq || 0; o.aop += v.aop; o.ly += v.ly;
   }
   return m;
 }
 function verRowOf(ver, key) { return ver && ver.rows ? ver.rows[key] : null; }
+/* 单行的版本同期间金额:快照月度值 + 已关账月用当前实际回填 */
+function verPeriodFy(vr, key, ms) {
+  if (!vr || !vr.m) return null;
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
+  let s = 0;
+  for (const i of ms) {
+    const x = vr.m[i];
+    if (x != null) s += x;
+    else if (actSet.has(i + 1)) { const r = S.idx.get(key); if (r) s += r.actA[i]; }
+  }
+  return s;
+}
 
 /* =================== 保存代表填写 =================== */
 const saveRepDoc = debounce(async rep => {
@@ -1026,12 +1099,12 @@ function paintEntry(e) {
   const ver = S._fillVer, vr = verRowOf(ver, e.key);
   if (ver) {
     const ms = getPeriodMonths(S.period);
-    let vfy = 0; if (vr && vr.m) for (const mi of ms) vfy += (vr.m[mi] || 0);
-    const d = (vr && vr.m) ? pe.fy - vfy : null;
-    set("vfy-" + i, (vr && vr.m) ? fmtK(vfy) : "–");
+    const vfy = verPeriodFy(vr, e.key, ms);
+    const d = vfy === null ? null : pe.fy - vfy;
+    set("vfy-" + i, vfy === null ? "–" : fmtK(vfy));
     set("dfy-" + i, d === null ? "–" : fmtDK(d), d ? (d > 0 ? "pos delta-up" : "neg delta-dn") : "");
-    const vfyAop = vr ? (function(){ let s=0; for(const mi of ms) s+=(vr.m?vr.m[mi]:0); return s; })() : 0;
-    const va = vr && vr.aop > 0 ? vr.fy / vr.aop : null;
+    // 同期间口径对比:旧版本同期值 ÷ 同期 AOP
+    const va = (vfy !== null && pe.aop > 0) ? vfy / pe.aop : null;
     const dach = ach !== null && va !== null ? ach - va : null;
     set("dach-" + i, fmtPP(dach), clsSign(dach));
   }
@@ -1054,7 +1127,7 @@ function paintGroupSubs(entries, ver) {
     for (const e of list) for (let i = 0; i < 12; i++) mm[i] += e.m[i].a;
     
     let vtxt = "";
-    if (ver) { let vfy = 0, has = false; for (const e of list) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; has = true; } }
+    if (ver) { let vfy = 0, has = false; for (const e of list) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) { vfy += s; has = true; } }
       if (has) { const d = fy - vfy; vtxt = ' · vs上版 <span class="num ' + clsSign(d) + '">' + fmtDK(d) + "</span>"; } }
     
     /* 小计行改成跟总计行一样的格式 */
@@ -1063,7 +1136,7 @@ function paintGroupSubs(entries, ver) {
     h += '<td class="l"></td>'; // 备注空列
     h += '<td class="num"><b>' + fmtK(fy) + '</b></td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td>' +
       '<td class="num">' + fmtK(ly) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + '</td>';
-    if (ver) { let vfy = 0; for (const e of list) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; } }
+    if (ver) { let vfy = 0; for (const e of list) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) vfy += s; }
       const d = fy - vfy; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td></td>'; }
     el.parentElement.innerHTML = h;
   }
@@ -1079,7 +1152,7 @@ function paintGroupSubs(entries, ver) {
   const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
   h += '<td class="num">' + fmtK(fy) + '</td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + "</td>" +
     '<td class="num">' + fmtK(ly) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>";
-  if (ver) { let vfy = 0; for (const e of entries) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; } }
+  if (ver) { let vfy = 0; for (const e of entries) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) vfy += s; }
     const d = fy - vfy; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td></td>'; }
   tr.innerHTML = h;
 }
@@ -1094,7 +1167,7 @@ function paintRepStats(entries, ver) {
   const ytdGr = ytdP > 0 ? ytdA / ytdP - 1 : null;
   let vfy = 0, has = false;
   const ms = getPeriodMonths(p);
-  if (ver) for (const e of entries) { const vr = verRowOf(ver, e.key); if (vr && vr.m) { let s = 0; for (const i of ms) s += (vr.m[i] || 0); vfy += s; has = true; } }
+  if (ver) for (const e of entries) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) { vfy += s; has = true; } }
   const d = has ? fy - vfy : null;
   const pLbl = p === "FY" ? "全年" : p;
   el.innerHTML =
@@ -1178,7 +1251,7 @@ async function renderDash() {
 
   const rows = rollup(entries, dimDefs[d.dim].f);
   if (d.dim === "grp") rows.sort((a, b) => grpSortKey(a.dim).localeCompare(grpSortKey(b.dim)));
-  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm) : null;
+  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm, ms) : null;
 
   /* 期间总览 */
   const T = rows.reduce((o, r) => {
@@ -1249,7 +1322,8 @@ async function renderDash() {
     if (ver) {
       if (vr) {
         const vfy = isAmt ? vr.fy : vr.fyq; const dlt = fyV - vfy;
-        const vach = vr.aop > 0 ? vr.fy / vr.aop : null, vgr = vr.ly > 0 ? vr.fy / vr.ly - 1 : null;
+        // 同期间口径:旧版同期值 ÷ 当前同期 AOP / 去年同期
+        const vach = rAop > 0 ? vr.fy / rAop : null, vgr = rLy > 0 ? vr.fy / rLy - 1 : null;
         const dach = ach !== null && vach !== null ? ach - vach : null;
         const dgr = gr !== null && vgr !== null ? gr - vgr : null;
         html += '<td class="num">' + vK(vfy) + '</td><td class="num ' + (dlt > 1e-6 ? "pos delta-up" : dlt < -1e-6 ? "neg delta-dn" : "") + '">' + (isAmt ? fmtDK(dlt) : (dlt > 0 ? "+" : "") + fmtQ(dlt)) + "</td>" +
@@ -1281,7 +1355,7 @@ async function renderDash() {
   for (const x of overalls) html += '<div class="rm-li"><span class="who">\u3010\u6574\u4f53\u3011' + esc(x.rep) + "</span>" + esc(x.overall) + "</div>";
   for (const e of allRm.sort((a, b) => b.fy - a.fy)) {
     const pe = calcEntryPeriod(e, dp);
-    const vr = verRowOf(ver, e.key); const dlt = vr ? (function(){ const ms2=getPeriodMonths(dp); let s=0; if(vr.m) for(const i of ms2) s+=(vr.m[i]||0); return pe.fy-s; })() : null;
+    const vfy0 = verPeriodFy(verRowOf(ver, e.key), e.key, getPeriodMonths(dp)); const dlt = vfy0 === null ? null : pe.fy - vfy0;
     html += '<div class="rm-li"><span class="who">' + esc(e.rep) + " \xb7 " + esc(e.prov) + " \xb7 <b>" + esc(e.grp) + "</b></span>" + esc(e.rm) +
       ' <span class="num" style="color:var(--mute);font-size:11px">(' + pShort + ' ' + fmtK(pe.fy) + "K" + (dlt !== null ? ' \xb7 vs\u4e0a\u7248 <span class="' + clsSign(dlt) + '">' + fmtDK(dlt) + "</span>" : "") + ")</span></div>";
   }
@@ -1361,11 +1435,11 @@ function dashDetail(r, ver, isAmt, d, dp) {
     const pe = calcEntryPeriod(e, dp || "FY");
     const ach = pe.aop > 0 ? pe.fy / pe.aop : null, gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
     const vr = verRowOf(ver, e.key);
-    let vfy = 0; if (vr && vr.m) for (const i of ms) vfy += (vr.m[i] || 0);
-    const dlt = (vr && vr.m) ? pe.fy - vfy : null;
+    const vfy = verPeriodFy(vr, e.key, ms);
+    const dlt = vfy === null ? null : pe.fy - vfy;
     h += '<tr><td class="l">' + esc(e.rep) + '</td><td class="l">' + esc(e.prov) + '</td><td class="l">' + esc(e.grp) + (e.manual ? '<span class="tag new">\u65b0\u589e</span>' : "") + "</td>" +
       '<td class="num">' + fmtK(pe.fy) + '</td><td class="num">' + fmtK(pe.aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>" +
-      (ver ? '<td class="num">' + (vr && vr.m ? fmtK(vfy) : "\u2013") + '</td><td class="num ' + clsSign(dlt) + '">' + (dlt === null ? "\u65b0\u589e" : fmtDK(dlt)) + "</td>" : "") +
+      (ver ? '<td class="num">' + (vfy !== null ? fmtK(vfy) : "\u2013") + '</td><td class="num ' + clsSign(dlt) + '">' + (dlt === null ? "\u65b0\u589e" : fmtDK(dlt)) + "</td>" : "") +
       '<td class="l" style="white-space:normal;max-width:300px">' + esc(e.rm || "") + "</td></tr>";
   }
   return h + "</tbody></table></td></tr>";
@@ -1400,15 +1474,21 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
   const K = v => Math.round(v / 100) / 10; // 千元1位
   const P = v => v === null || !isFinite(v) ? null : Math.round(v * 1000) / 10; // %1位
   const d = S.dash;
-  const head1 = [dimDefs[d.dim].name, "YTD Ach%", "FY预估K", "FY AOP K", "Ach%", "FY" + S.cfg.ly + " K", "GR%", "上版FY K", "ΔFY K", "ΔAch pp", "ΔGR pp", "填写进度%", "备注条数"];
-  const aoa1 = [["周期", S.cfg.cycleLabel, "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
-  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm) : null;
+  const dp = d.period || "FY";
+  const msX = getPeriodMonths(dp);
+  const pS = dp === "FY" ? "FY" : dp;
+  const actSetX = new Set(S.cfg.actMonths || []);
+  const head1 = [dimDefs[d.dim].name, "YTD Ach%", pS + "预估K", pS + " AOP K", "Ach%", S.cfg.ly + pS + " K", "GR%", "上版" + pS + " K", "Δ" + pS + " K", "ΔAch pp", "ΔGR pp", "填写进度%", "备注条数"];
+  const aoa1 = [["周期", S.cfg.cycleLabel, "期间", pS, "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
+  const vRoll = ver ? rollupVer(ver, d.dim, d.rsm, msX) : null;
   for (const r of rows) {
-    const ach = r.aop > 0 ? r.fy / r.aop : null, gr = r.ly > 0 ? r.fy / r.ly - 1 : null;
+    let rFy = 0, rAop = 0, rLy = 0, ytdAct = 0, ytdAop = 0;
+    for (const i of msX) { rFy += r.m[i]; rAop += r.aopA[i]; rLy += r.lyA[i]; if (actSetX.has(i + 1)) { ytdAct += r.m[i]; ytdAop += r.aopA[i]; } }
+    const ach = rAop > 0 ? rFy / rAop : null, gr = rLy > 0 ? rFy / rLy - 1 : null;
     const vr = vRoll ? vRoll.get(r.dim) : null;
-    const vach = vr && vr.aop > 0 ? vr.fy / vr.aop : null, vgr = vr && vr.ly > 0 ? vr.fy / vr.ly - 1 : null;
-    aoa1.push([r.dim, P(r.ytdAop > 0 ? r.ytdAct / r.ytdAop : null), K(r.fy), K(r.aop), P(ach), K(r.ly), P(gr),
-      vr ? K(vr.fy) : null, vr ? K(r.fy - vr.fy) : null,
+    const vach = vr && rAop > 0 ? vr.fy / rAop : null, vgr = vr && rLy > 0 ? vr.fy / rLy - 1 : null;
+    aoa1.push([r.dim, P(ytdAop > 0 ? ytdAct / ytdAop : null), K(rFy), K(rAop), P(ach), K(rLy), P(gr),
+      vr ? K(vr.fy) : null, vr ? K(rFy - vr.fy) : null,
       ach !== null && vach !== null ? P(ach - vach) : null, gr !== null && vgr !== null ? P(gr - vgr) : null,
       r.openTotal ? Math.round(r.openFilled / r.openTotal * 100) : 100, r.rms.length]);
   }
@@ -1592,7 +1672,7 @@ async function importPackage(file) {
     await Store.set("fc-cfg", d.cfg); await Store.set("fc-master", d.master);
     for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
     for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
-    if (d.passwords) await Passwords.importIfEmpty(d.passwords);
+    if (d.passwords) { await Passwords.applyFromPackage(d.passwords); Passwords._loaded = false; await Passwords._load(); }
     await loadAll(); validateMe(); applyMe(); rerender();
     if (S.gateOpen) renderGate();
     toast("✅ 数据包已载入: " + ((d.cfg && d.cfg.cycleLabel) || ""));
@@ -1612,7 +1692,7 @@ function openClearAll() {
     Passwords._cache = {}; Passwords._loaded = true; await Store.set("fc-passwords", {});
     S.cfg = null; S.master = null; S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
     S.curRep = ""; S.dash.cmp = "latest"; S.dash.cmpId = "";
-    if (S.me && S.me.role !== "admin") { S.me = null; if (Store.shared) await Store.pdel("fc-me"); }
+    if (S.me && S.me.role !== "admin") { S.me = null; await Store.pdel("fc-me"); }
     applyMe(); rerender(); toast("已全部清空");
   };
 }
@@ -1682,22 +1762,21 @@ function renderAdmin() {
   h += '<div class="card"><div class="card-h"><b>⑤ 数据同步与备份</b></div><div style="padding:14px 16px;font-size:13px">';
   if (Store.shared) h += "<p>🟢 当前为<b>共享模式</b>:所有人打开同一个发布链接即实时共用一份数据。销售填完,你的看板立即可见,<b>无需任何文件传递</b>。</p>" +
     '<p style="color:var(--mute);font-size:12px;margin:8px 0">仍建议每次提报截止后导出一份数据包留档。</p><button class="btn sm" id="ad-exppkg">⬇ 导出数据包备份</button>';
-  else h += "<p>💾 当前为<b>本地模式</b>(直接打开 HTML 文件):数据只存在于本页面,关闭即失。用文件接力:</p>" +
+  else h += "<p>💾 当前为<b>本地模式</b>(直接打开 HTML 文件):数据保存在本浏览器(localStorage),换电脑/换浏览器不互通。用文件接力:</p>" +
     '<ol class="steps" style="margin:8px 0"><li><b>你</b>:导入系统数据 → <b>导出数据包</b>发给所有销售</li><li><b>销售</b>:打开同一个 HTML → 导入数据包 → 填写 → 在填写页<b>导出我的预估文件</b>发回</li><li><b>你</b>:导入自己的数据包 → <b>导入代表预估文件</b>(可一次多选)→ 看板汇总 / 导出 Excel</li></ol>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" id="ad-exppkg">⬇ 导出数据包</button><button class="btn sm" id="ad-imppkg">📥 导入数据包</button><button class="btn sm" id="ad-impreps">📥 导入代表预估文件(多选)</button></div>';
   h += "</div></div>";
   /* ⑥ 安全与权限 */
-  h += '<div class="card"><div class="card-h"><b>⑥ 安全、权限与维护</b></div><div style="padding:14px 16px;font-size:13px">' +
-    '<div class="field" style="margin-bottom:10px"><label>管理 PIN(管理员登录时需要;留空 = 任何人都能进)</label><div style="display:flex;gap:8px"><input class="ctrl" id="pin-new" style="flex:1" placeholder="例如 0626"><button class="btn sm" id="pin-save">保存</button></div></div>' +
-    '<div class="field" style="margin-bottom:10px"><label>经理通用口令(DSM/RSM 登录时需要,作为每人未单独设密码时的默认值;留空 = 不设)</label><div style="display:flex;gap:8px"><input class="ctrl" id="mgr-new" style="flex:1" placeholder="例如 8888"><button class="btn sm" id="mgr-save">保存</button></div></div>' +
+  h += '<div class="card"><div class="card-h"><b>⑥ 安全、权限与维护</b></div><div style="padding:14px 16px;font-size:13px" id="sec-card">' +
+    '<div class="field" style="margin-bottom:10px"><label>管理 PIN(管理员登录时需要;留空保存 = 取消)<span id="pin-state" style="margin-left:6px"></span></label><div style="display:flex;gap:8px"><input type="password" class="ctrl" id="pin-new" style="flex:1" placeholder="例如 0626"><button class="btn sm" id="pin-save">保存</button></div></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>经理通用口令(DSM/RSM 登录时需要,作为每人未单独设密码时的默认值;留空保存 = 取消)<span id="mgr-state" style="margin-left:6px"></span></label><div style="display:flex;gap:8px"><input type="password" class="ctrl" id="mgr-new" style="flex:1" placeholder="例如 8888"><button class="btn sm" id="mgr-save">保存</button></div></div>' +
     '<div style="margin:12px 0;border-top:1px dashed var(--line);padding-top:10px">' +
-    '<label style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:8px;display:block">👤 个人角色密码(可选 — 给某个 DSM/RSM 单独设置密码,其他人仍用上面通用口令)</label>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:6px;font-size:11.5px;color:var(--mute);margin-bottom:4px"><span>姓名</span><span>角色</span><span>密码(留空=用通用口令)</span></div>' +
+    '<label style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:8px;display:block">👤 个人角色密码(可选 — 给某个 DSM/RSM 单独设置密码,其他人仍用上面通用口令;在输入框中填写后失焦即自动保存)</label>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:6px;font-size:11.5px;color:var(--mute);margin-bottom:4px"><span>姓名</span><span>角色</span><span>密码</span></div>' +
     '<div id="personal-pins"></div>' +
-    '<button class="btn sm" id="add-personal-pin" style="margin-top:6px">＋ 添加个人密码(在输入框中填写后失焦即自动保存)</button>' +
     '</div>' +
     '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
-    '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:代表不需要密码;DSM/RSM 先检查是否设置了个人密码,有则用个人密码,无则用上面通用口令。所有密码保存在本地浏览器,云端同步后团队成员各自生效。</p>' +
+    '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:代表不需要密码;DSM/RSM 先检查是否设置了个人密码,有则用个人密码,无则用通用口令。密码以加密哈希形式保存并随「导出数据包」一起带出 —— 上传到 GitHub 后,团队成员打开页面会自动同步生效。<b>改完密码记得重新导出数据包并上传。</b></p>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div></div></div>';
   h += "</div>";
   /* ⑦ 流程说明 */
@@ -1738,14 +1817,16 @@ function renderAdmin() {
   $("#pin-save").onclick = async () => {
     if (!S.cfg) { toast("请先导入数据再设置 PIN"); return; }
     const v = $("#pin-new").value.trim();
-    await Passwords.setAdminPin(v);
-    toast(v ? "已保存管理 PIN" : "已取消管理 PIN");
+    await Passwords.setAdminPin(v); $("#pin-new").value = "";
+    renderPinStates();
+    toast(v ? "已保存管理 PIN — 别忘了重新导出数据包并上传" : "已取消管理 PIN");
   };
   $("#mgr-save").onclick = async () => {
     if (!S.cfg) { toast("请先导入数据再设置口令"); return; }
     const v = $("#mgr-new").value.trim();
-    await Passwords.setMgrPin(v);
-    toast(v ? "已保存经理口令" : "已取消经理口令");
+    await Passwords.setMgrPin(v); $("#mgr-new").value = "";
+    renderPinStates();
+    toast(v ? "已保存经理口令 — 别忘了重新导出数据包并上传" : "已取消经理口令");
   };
   $$("#tab-admin [data-rs]").forEach(b => b.onclick = async () => {
     if (!S.cfg) { toast("请先导入数据"); return; }
@@ -1753,7 +1834,14 @@ function renderAdmin() {
     renderAdmin(); toast("RSM 可见范围: " + (b.dataset.rs === "own" ? "仅自己大区" : "全部大区"));
   });
   $("#ad-clear").onclick = openClearAll;
+  renderPinStates();
   renderPersonalPins();
+}
+async function renderPinStates() {
+  const a = await Passwords.getAdminPin(), m = await Passwords.getMgrPin();
+  const tag = on => on ? '<span style="color:var(--green);font-weight:600">已设置 ✓</span>' : '<span style="color:var(--mute)">未设置</span>';
+  if ($("#pin-state")) $("#pin-state").innerHTML = tag(!!a);
+  if ($("#mgr-state")) $("#mgr-state").innerHTML = tag(!!m);
 }
 async function saveCfgBasics() {
   if (!S.cfg) return;
@@ -1770,29 +1858,40 @@ async function renderPersonalPins() {
   const pins = await Passwords.getAllPins();
   const dsms = [...new Set([...S.idx.values()].map(r => r.dsm).filter(Boolean))].sort((a,b) => a.localeCompare(b, "zh"));
   const rsms = [...new Set([...S.idx.values()].map(r => r.rsm).filter(Boolean))].sort((a,b) => a.localeCompare(b, "zh"));
-  
+
   let h = '';
   for (const role of ["dsm", "rsm"]) {
     const names = role === "dsm" ? dsms : rsms;
     const rpins = pins[role] || {};
     for (const name of names) {
-      const pv = rpins[name] || "";
-      h += '<div class="vlist vitem" style="padding:4px 0"><span style="font-size:12px;min-width:80px">' + esc(name) + '</span>' +
+      const has = !!rpins[name];
+      h += '<div class="vlist vitem" style="padding:4px 0;display:flex;align-items:center;gap:6px"><span style="font-size:12px;min-width:80px">' + esc(name) + '</span>' +
         '<span style="font-size:11px;background:#EDF1F7;border-radius:4px;padding:1px 6px;min-width:40px;text-align:center">' + (role === "dsm" ? "DSM" : "RSM") + '</span>' +
-        '<input class="ctrl" style="flex:1;max-width:200px" placeholder="留空=用通用口令" data-ppin-role="' + role + '" data-ppin-name="' + esc(name) + '" value="' + esc(pv) + '">' +
+        '<input type="password" class="ctrl" style="flex:1;max-width:200px" placeholder="' + (has ? "已设置 ✓ — 输入可覆盖" : "未设置(用通用口令)") + '" data-ppin-role="' + role + '" data-ppin-name="' + esc(name) + '">' +
+        (has ? '<button class="btn sm" data-ppin-clear-role="' + role + '" data-ppin-clear-name="' + esc(name) + '" title="清除个人密码,改回用通用口令">✕ 清除</button>' : '') +
         '</div>';
     }
   }
   if (!h) h = '<span style="color:var(--mute);font-size:12px">导入数据后这里会列出所有 DSM/RSM,可为每人单独设密码。</span>';
   el.innerHTML = h;
-  
-  // 绑定输入事件 — 保存到 Passwords 独立存储
+
+  // 输入后失焦保存(哈希存储)
   $$("#personal-pins input[data-ppin-role]").forEach(inp => {
     inp.onchange = async () => {
       const role = inp.dataset.ppinRole, name = inp.dataset.ppinName;
       const v = inp.value.trim();
+      if (!v) return; // 留空不动 —— 清除请用「✕ 清除」按钮
       await Passwords.setPersonalPin(role, name, v);
-      toast(v ? esc(name) + " 已设置 " + (role === "dsm" ? "DSM" : "RSM") + " 个人密码" : esc(name) + " 已取消个人密码");
+      toast(name + " 已设置 " + (role === "dsm" ? "DSM" : "RSM") + " 个人密码 — 别忘了重新导出数据包并上传");
+      renderPersonalPins();
+    };
+  });
+  $$("#personal-pins [data-ppin-clear-role]").forEach(btn => {
+    btn.onclick = async () => {
+      const role = btn.dataset.ppinClearRole, name = btn.dataset.ppinClearName;
+      await Passwords.setPersonalPin(role, name, "");
+      toast(name + " 已取消个人密码,将使用通用口令");
+      renderPersonalPins();
     };
   });
 }
@@ -1818,8 +1917,14 @@ async function renderGate() {
   renderGate.cur = role;
   const L = hasData ? nameLists() : { reps: [], dsms: [], rsms: [] };
   const names = role === "rep" ? L.reps : role === "dsm" ? L.dsms : role === "rsm" ? L.rsms : [];
-  // 每人独立密码：Passwords 独立存储,云端同步不覆盖
-  const nameStr = role !== "admin" ? ($("#g-name") ? $("#g-name").value : "") : "";
+  // 计算"将被选中"的姓名:已在下拉里则取下拉值,否则取记住的身份/名单第一个 —— 修复首次打开时个人密码被绕过的问题
+  let nameStr = "";
+  if (role !== "admin") {
+    const sel = $("#g-name");
+    if (sel && sel.value && names.includes(sel.value)) nameStr = sel.value;
+    else if (S.me && S.me.role === role && names.includes(S.me.name)) nameStr = S.me.name;
+    else nameStr = names[0] || "";
+  }
   const personalPin = (role === "dsm" || role === "rsm") && nameStr ? await Passwords.getPersonalPin(role, nameStr) : undefined;
   const adminPin = role === "admin" ? await Passwords.getAdminPin() : undefined;
   const mgrPin = (role === "dsm" || role === "rsm") ? await Passwords.getMgrPin() : undefined;
@@ -1833,15 +1938,14 @@ async function renderGate() {
     if (!Store.shared) b += '<button class="btn sm" id="g-import" style="margin:8px 0">📥 导入数据包</button>';
   } else if (role !== "admin") {
     b += '<div class="field" style="margin-bottom:10px"><label>我的姓名</label><select class="ctrl" id="g-name" style="width:100%" onchange="if(typeof renderGate===\'function\')renderGate()">' +
-      names.map(n => "<option" + (S.me && S.me.name === n ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></div>";
+      names.map(n => "<option" + (n === nameStr ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></div>";
   }
   if (needPin) {
     const pinLabel = role === "admin" ? "管理 PIN" : (personalPin ? esc(nameStr) + " 的登录密码" : "经理口令");
     b += '<div class="field" style="margin-bottom:6px"><label>' + pinLabel + '</label><input type="password" class="ctrl" id="g-pin" style="width:100%"></div>';
   }
   b += '<p style="font-size:12px;color:var(--mute);margin-top:8px">身份决定可见范围:<b>代表</b>只看自己的填写与汇总;<b>DSM</b> 看本团队;<b>RSM</b> 看' +
-    ((S.cfg && S.cfg.rsmScope === "own") ? "本大区" : "全部") + ";<b>管理员</b>看全部并可进入后台。" +
-    (Store.shared ? "选择会记在你自己的设备上,下次自动进入。" : "") + "</p>";
+    ((S.cfg && S.cfg.rsmScope === "own") ? "本大区" : "全部") + ";<b>管理员</b>看全部并可进入后台。选择会记在你自己的设备上,下次自动进入。</p>";
   const foot = (S.me ? '<button class="btn" id="g-cancel">取消</button>' : "") + '<button class="btn pri" id="g-ok">进入</button>';
   openModal("选择身份", b, foot);
   $$("#modal [data-gr]").forEach(btn => btn.onclick = () => { renderGate.cur = btn.dataset.gr; renderGate(); });
@@ -1851,7 +1955,7 @@ async function renderGate() {
     if (!hasData && role !== "admin") { toast("暂无人员名单,请先由管理员导入数据"); return; }
     if (needPin) {
       const correctPin = personalPin || (role === "admin" ? adminPin : mgrPin);
-      if ($("#g-pin").value !== correctPin) { toast("密码不正确"); return; }
+      if (!(await Passwords.verify($("#g-pin").value, correctPin))) { toast("密码不正确"); return; }
     }
     const name = role === "admin" ? "管理员" : ($("#g-name") ? $("#g-name").value : "");
     if (role !== "admin" && !name) { toast("请选择姓名"); return; }
@@ -1953,34 +2057,37 @@ async function cloudFetch(silent) {
 }
 async function cloudPull(force) {
   if (!cloudMode()) { toast("⚠ CLOUD_URL 为空,请在代码中配置数据包 Raw URL"); return false; }
-  const localMeta = await Store.get("fc-master");
-  // 仅当本地无数据（首次打开）时自动拉取；force=true 可强制拉取
-  if (!force && localMeta) return false;
   const d = await cloudFetch(!force);  // 手动同步(silent=false)显示详细错误
   if (!d) return false;
+  // 云端文件未更新(同一 exportedAt)且非手动强制 → 不重复写入,保护管理员本机未上传的修改
+  const lastTs = await Store.get("fc-cloud-ts");
+  if (!force && lastTs && d.exportedAt && d.exportedAt <= lastTs) return false;
   try {
     await Store.set("fc-cfg", d.cfg);
     await Store.set("fc-master", d.master);
-    for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
+    // 各人预估:取更新时间较新的一方,避免覆盖本机刚填、尚未汇总进云端包的数据
+    for (const f of (d.forecasts || [])) if (f && f.rep) {
+      const local = await Store.get("fc-f-" + f.rep);
+      if (!local || (local.updatedAt || 0) <= (f.updatedAt || 0)) await Store.set("fc-f-" + f.rep, f);
+    }
     for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+    // ★ 密码同步:包内时间戳更新(或本地为空)即生效 —— 管理员设密码后导出上传,团队打开页面即要求新密码
+    if (d.passwords) await Passwords.applyFromPackage(d.passwords);
+    Passwords._loaded = false; await Passwords._load();
+    if (d.exportedAt) await Store.set("fc-cloud-ts", d.exportedAt);
   } catch (e) {
     toast("⚠ 数据写入失败,可能超出浏览器存储上限: " + (e.message || e));
     return false;
   }
   await loadAll(); validateMe(); applyMe();
-  // 密码存在独立 key fc-passwords 中,云端同步不覆盖
-  Passwords._loaded = false; await Passwords._load();
   const label = (d.cfg && d.cfg.cycleLabel) || "云端数据";
   toast("✅ 已同步云端数据: " + label + " (" + new Date(d.exportedAt).toLocaleString("zh-CN") + ")");
   return true;
 }
 async function init() {
   await Store.init();
-  // 云端模式：自动拉取管理员发布的数据包
-  if (cloudMode()) {
-    const localCfg = await Store.get("fc-cfg");
-    if (!localCfg) await cloudPull(false);
-  }
+  // 云端模式：每次打开都检查云端是否有新数据包(同一包不会重复写入)
+  if (cloudMode()) await cloudPull(false);
   /* 初始化水印 */
   const wm = $("#watermark");
   if (wm) {
