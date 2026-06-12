@@ -387,7 +387,8 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
   <div class="bar-right">
     <button class="icon-btn" id="btn-me" title="切换身份 / 可见范围">👤 选择身份</button>
     <span class="sync-badge" id="sync-badge">本地模式</span>
-    <button class="icon-btn" id="btn-refresh" title="重新读取共享数据">🔄 刷新</button>
+    <button class="icon-btn" id="btn-cloud" title="从 GitHub 拉取最新数据包" style="display:none">☁ 云端同步</button>
+    <button class="icon-btn" id="btn-refresh" title="刷新页面数据">🔄 刷新</button>
   </div>
 </header>
 
@@ -417,10 +418,14 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 <script>
 /* =====================================================================
    预估收集工具 — 单文件应用
-   双运行模式:
-   ① 作为 Claude Artifact 发布 → window.storage 共享存储,全员实时共用一份数据
-   ② 作为本地 HTML 文件   → 内存运行 + JSON 数据包/预估文件 离线接力
+   三运行模式:
+   ① 作为 Claude Artifact 发布 → window.storage 共享存储，全员实时共用
+   ② GitHub Pages 云端模式   → 管理员上传数据包 JSON，其他人自动拉取
+   ③ 本地 HTML 文件           → localStorage 持久化 + 数据包文件接力
+   — 修改下面的 CLOUD_URL 为你的 GitHub 数据包 Raw URL 即可启用云端 —
    ===================================================================== */
+// ★ 改为你的 GitHub 数据包 Raw URL（以 https://raw.githubusercontent.com/ 开头）
+const CLOUD_URL = "https://github.com/kong19891105/Forecast/blob/main/data.json";
 "use strict";
 const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const $  = s => document.querySelector(s);
@@ -445,44 +450,33 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
 
 /* =================== 存储适配层 =================== */
-const LS = "fc:"; // localStorage 键名前缀,避免与其他网站数据冲突
 const Store = {
   shared: false,
+  mem: {},
   async init() { try { if (window.storage && typeof window.storage.get === "function") { await window.storage.list("fc-", true); this.shared = true; } } catch (e) { this.shared = false; } },
   async get(k) {
     if (this.shared) { try { const r = await window.storage.get(k, true); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
-    try { const raw = localStorage.getItem(LS + k); return raw != null ? JSON.parse(raw) : null; } catch (e) { console.error("localStorage get error", e); return null; }
+    return this.mem[k] !== undefined ? this.mem[k] : null;
   },
   async set(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), true); return !!r; } catch (e) { console.error(e); toast("⚠ 共享存储写入失败"); return false; } }
-    try { localStorage.setItem(LS + k, JSON.stringify(v)); return true; } catch (e) { console.error("localStorage set error", e); toast("⚠ 浏览器存储空间不足,请清理旧数据"); return false; }
+    this.mem[k] = JSON.parse(JSON.stringify(v)); return true;
   },
-  async del(k) {
-    if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} }
-    else { try { localStorage.removeItem(LS + k); } catch (e) {} }
-  },
+  async del(k) { if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} } else delete this.mem[k]; },
   async list(prefix) {
     if (this.shared) { try { const r = await window.storage.list(prefix, true); return (r && r.keys) ? r.keys.map(x => typeof x === "string" ? x : x.key) : []; } catch (e) { return []; } }
-    const keys = [];
-    try {
-      const lp = LS + prefix;
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(lp)) keys.push(key.slice(LS.length));
-      }
-    } catch (e) { console.error("localStorage list error", e); }
-    return keys;
+    return Object.keys(this.mem).filter(k => k.startsWith(prefix));
   },
   /* 个人空间(shared=false): 每个使用者各自一份,用于记住身份 */
   async pget(k) {
     if (this.shared) { try { const r = await window.storage.get(k, false); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
-    try { const raw = localStorage.getItem(LS + "my:" + k); return raw != null ? JSON.parse(raw) : null; } catch (e) { return null; }
+    return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
   },
   async pset(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), false); return !!r; } catch (e) { return false; } }
-    try { localStorage.setItem(LS + "my:" + k, JSON.stringify(v)); return true; } catch (e) { return false; }
+    this.mem["p:" + k] = JSON.parse(JSON.stringify(v)); return true;
   },
-  async pdel(k) { if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} } else { try { localStorage.removeItem(LS + "my:" + k); } catch (e) {} } }
+  async pdel(k) { if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} } else delete this.mem["p:" + k]; }
 };
 
 /* =================== 全局状态 =================== */
@@ -1847,8 +1841,44 @@ function initResizableTable(table) {
   });
 }
 
+function cloudMode() { return !!CLOUD_URL; }
+async function cloudFetch(silent) {
+  if (!cloudMode()) return null;
+  try {
+    const resp = await fetch(CLOUD_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const d = await resp.json();
+    if (d.kind !== "fc-package" || !d.master) throw new Error("格式无效");
+    return d;
+  } catch (e) {
+    if (!silent) toast("⚠ 云端数据拉取失败: " + (e.message || e));
+    console.error("cloudFetch:", e);
+    return null;
+  }
+}
+async function cloudPull(force) {
+  if (!cloudMode()) return false;
+  const localMeta = await Store.get("fc-master");
+  // 仅当本地无数据（首次打开）时自动拉取；force=true 可强制拉取
+  if (!force && localMeta) return false;
+  const d = await cloudFetch(false);
+  if (!d) return false;
+  await Store.set("fc-cfg", d.cfg);
+  await Store.set("fc-master", d.master);
+  for (const f of (d.forecasts || [])) if (f && f.rep) await Store.set("fc-f-" + f.rep, f);
+  for (const v of (d.versions || [])) if (v && v.id) await Store.set("fc-v-" + v.id, v);
+  await loadAll(); validateMe(); applyMe();
+  const label = (d.cfg && d.cfg.cycleLabel) || "云端数据";
+  toast("✅ 已同步云端数据: " + label + " (" + new Date(d.exportedAt).toLocaleString("zh-CN") + ")");
+  return true;
+}
 async function init() {
   await Store.init();
+  // 云端模式：自动拉取管理员发布的数据包
+  if (cloudMode()) {
+    const localCfg = await Store.get("fc-cfg");
+    if (!localCfg) await cloudPull(false);
+  }
   /* 初始化水印 */
   const wm = $("#watermark");
   if (wm) {
@@ -1865,12 +1895,15 @@ async function init() {
   }
   const b = $("#sync-badge");
   if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
-  else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本次打开的页面中;请用管理后台的数据包导出/导入接力"; }
+  else if (cloudMode()) { b.textContent = "☁ 云端模式"; b.title = "管理员上传数据包后,其他人打开网页自动拉取最新数据"; b.style.background = "#EDF3FF"; b.style.color = "#2458E6"; b.style.borderColor = "#B9CDF5"; }
+  else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本浏览器;请用管理后台的数据包导出/导入接力"; }
   await loadAll();
   if (Store.shared) { S.me = await Store.pget("fc-me"); validateMe(); }
   if (S.me && S.me.role === "rep") S.curRep = S.me.name;
   $$(".tabs .tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
   $("#btn-me").onclick = () => renderGate();
+  $("#btn-cloud").onclick = async () => { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); };
+  if (cloudMode()) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
   $("#btn-refresh").onclick = async () => { toast("正在刷新 …"); await loadAll(); validateMe(); applyMe(); rerender(); if (!S.me) renderGate(); else toast("已读取最新数据"); };
   $("#mask").addEventListener("click", e => { if (S.gateOpen) return; if (e.target === $("#mask")) closeModal(); });
   $("#file-xlsx").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onXlsxFile(f); });
