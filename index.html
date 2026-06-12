@@ -161,6 +161,8 @@ select.ctrl:focus,input.ctrl:focus{
 .twrap{overflow:auto;max-height:72vh;border-radius:0 0 var(--r) var(--r)}
 .twrap::-webkit-scrollbar-track{background:var(--card)}
 table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;white-space:nowrap}
+/* 表头行整体垂直固定，确保所有表头单元格在上下滚动时一起固定 */
+.dt thead tr{position:sticky;top:0;z-index:5}
 .dt th{
   position:sticky;top:0;background:#EBEEF5;color:var(--ink2);
   font-weight:700;font-size:11px;padding:8px 10px;
@@ -178,7 +180,8 @@ table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;w
   position:sticky;left:0;z-index:2;
   border-right:2px solid var(--line);
 }
-.dt th.stick1{z-index:4}
+/* 表头第一列交叉点提高层级，确保在表头行固定时仍显示在最上层 */
+.dt th.stick1{z-index:6}
 .dt .grp-row td{
   background:#F2F4F8;font-weight:700;color:var(--ink);
   border-top:1px solid var(--line2);font-size:13px;
@@ -386,6 +389,7 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
   </nav>
   <div class="bar-right">
     <button class="icon-btn" id="btn-me" title="切换身份 / 可见范围">👤 选择身份</button>
+    <button class="icon-btn" id="btn-chgpwd" title="修改我的登录密码" style="display:none">🔒 修改密码</button>
     <span class="sync-badge" id="sync-badge">本地模式</span>
     <button class="icon-btn" id="btn-cloud" title="从 GitHub 拉取最新数据包" style="display:none">☁ 云端同步</button>
     <button class="icon-btn" id="btn-refresh" title="刷新页面数据">🔄 刷新</button>
@@ -1992,6 +1996,56 @@ async function exportPinRoster() {
   toast("名册已导出 — 按 DSM 拆分发给团队即可");
 }
 
+/* =================== 修改密码 =================== */
+function openChangePasswordModal() {
+  if (!S.me) { toast("请先选择身份"); return; }
+  const isAdmin = S.me.role === "admin";
+  const isRep = S.me.role === "rep";
+  const title = isAdmin ? "修改管理 PIN" : "修改 " + S.me.name + " 的登录密码";
+  const oldLabel = isAdmin ? "当前管理 PIN" : (isRep ? "当前登录密码" : "当前密码（未设过可留空）");
+  openModal(title,
+    '<div class="field" style="margin-bottom:10px"><label>' + oldLabel + '</label><input type="password" class="ctrl" id="cp-old" style="width:100%"></div>' +
+    '<div class="field" style="margin-bottom:10px"><label>新密码（留空 = 取消密码）</label><input type="password" class="ctrl" id="cp-new" style="width:100%"></div>' +
+    '<div class="field"><label>确认新密码</label><input type="password" class="ctrl" id="cp-confirm" style="width:100%"></div>',
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="cp-ok">保存</button>');
+  $("#cp-ok").onclick = doChangePassword;
+}
+
+async function doChangePassword() {
+  const old = $("#cp-old").value.trim();
+  const newPwd = $("#cp-new").value.trim();
+  const confirm = $("#cp-confirm").value.trim();
+
+  if (newPwd && newPwd !== confirm) { toast("两次输入的新密码不一致"); return; }
+
+  const { role, name } = S.me;
+  let currentPin;
+  if (role === "admin") {
+    currentPin = await Passwords.getAdminPin();
+  } else {
+    currentPin = await Passwords.getPersonalPin(role, name);
+  }
+
+  // 如果当前有密码，必须验证旧密码
+  if (currentPin && !(await Passwords.verify(old, currentPin))) {
+    toast("当前密码不正确"); return;
+  }
+
+  // 保存新密码
+  if (role === "admin") {
+    await Passwords.setAdminPin(newPwd);
+  } else {
+    await Passwords.setPersonalPin(role, name, newPwd);
+  }
+
+  // 更新本地身份记录的密码哈希值，避免下次刷新被 validateMe 踢出
+  S.me.pv = newPwd ? await sha256(newPwd) : "";
+  await Store.pset("fc-me", S.me);
+
+  closeModal();
+  toast(newPwd ? "密码已修改 — 建议重新导出数据包同步给团队" : "密码已取消");
+}
+
 /* =================== 身份选择 =================== */
 function applyMe() {
   const isAdmin = S.me && S.me.role === "admin";
@@ -1999,6 +2053,8 @@ function applyMe() {
   if (!isAdmin && S.tab === "admin") S.tab = "fill";
   const btn = $("#btn-me");
   if (btn) btn.textContent = "👤 " + (S.me ? (S.me.role === "admin" ? "管理员" : S.me.name) : "选择身份");
+  const btnChgPwd = $("#btn-chgpwd");
+  if (btnChgPwd) btnChgPwd.style.display = S.me ? "" : "none";
 }
 async function validateMe() {
   if (!S.me || !S.master) return;
@@ -2228,6 +2284,7 @@ async function init() {
   if (S.me && S.me.role === "rep") S.curRep = S.me.name;
   $$(".tabs .tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
   $("#btn-me").onclick = () => renderGate();
+  $("#btn-chgpwd").onclick = () => openChangePasswordModal();
   $("#btn-cloud").onclick = async () => { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); };
   if (cloudMode()) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
   $("#btn-refresh").onclick = async () => { toast("正在刷新 …"); await loadAll(); await validateMe(); applyMe(); rerender(); if (!S.me) renderGate(); else toast("已读取最新数据"); };
