@@ -490,6 +490,7 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
   <div class="logo"><b>预估收集</b><span id="bu-tag">URO · 月度滚动</span></div>
   <nav class="tabs">
     <button class="tab on" data-tab="fill">✏️ 填写预估</button>
+    <button class="tab" data-tab="progress">📋 提报进度</button>
     <button class="tab" data-tab="dash">📊 数据看板</button>
     <button class="tab" data-tab="admin">⚙️ 管理后台</button>
   </nav>
@@ -513,6 +514,8 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 <main>
   <!-- ============ 填写预估 ============ -->
   <section id="tab-fill"></section>
+  <!-- ============ 提报进度 ============ -->
+  <section id="tab-progress" style="display:none"></section>
   <!-- ============ 数据看板 ============ -->
   <section id="tab-dash" style="display:none"></section>
   <!-- ============ 管理后台 ============ -->
@@ -557,7 +560,8 @@ function fmtPct(v) { return (v === null || !isFinite(v)) ? "–" : (v * 100).toF
 function fmtPP(v)  { return (v === null || !isFinite(v)) ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "pp"; }
 function fmtDK(v)  { if (v === null || !isFinite(v)) return "–"; const s = fmtK(Math.abs(v)); return (v >= 0 ? "+" : "-") + s; }
 function clsSign(v, inv) { if (v === null || !isFinite(v) || Math.abs(v) < 1e-9) return ""; return (v > 0) !== !!inv ? "pos" : "neg"; }
-function clsAch(v) { if (v === null || !isFinite(v)) return ""; return v >= 1 ? "pos" : (v < 0.9 ? "neg" : "warn"); }
+function clsAch(v) { if (v === null || !isFinite(v)) return ""; return v >= 1 ? "pos" : (v < 0.8 ? "neg" : "warn"); }
+function achSymHtml(v) { if (v === null || !isFinite(v)) return ""; return '<span style="color:' + (v >= 1 ? "var(--green)" : (v < 0.8 ? "var(--red)" : "var(--amber)")) + ';font-size:0.9em">● </span>'; }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400); }
 
@@ -1154,7 +1158,7 @@ function renderCtx() {
   const pLabel = periodLabel(S.period);
   kp.innerHTML =
     '<div class="ctx-kpi"><small>YTD达成</small><b class="num">' + fmtPct(ytdAch) + "</b></div>" +
-    '<div class="ctx-kpi"><small>' + pLabel + '预估达成</small><b class="num">' + fmtPct(ach) + "</b></div>" +
+    '<div class="ctx-kpi"><small>' + pLabel + '预估达成</small><b class="num">' + achSymHtml(ach) + fmtPct(ach) + "</b></div>" +
     '<div class="ctx-kpi"><small>' + pLabel + ' GR% vs FY' + S.cfg.ly + "</small><b class=\"num\">" + fmtPct(gr) + "</b></div>" +
     '<div class="ctx-kpi"><small>填写进度 ' + Math.round(oT ? oF / oT * 100 : 0) + '%</small><div class="gauge"><i style="width:' + Math.min(100, oT ? oF / oT * 100 : 0) + '%"></i></div></div>';
 }
@@ -1423,6 +1427,81 @@ async function renderFill() {
     paintEntry(en); paintRepStats(entries, ver); paintGroupSubs(entries, ver); paintFillChart(entries); renderCtx();
     if (mvFill) saveMgrDoc(); else saveRepDoc(repToSave);
   });
+  /* 整块粘贴(Excel 风格) */
+  $("#fill-body").addEventListener("paste", e => {
+    const t = e.target; if (!t.dataset || t.dataset.ri === undefined) return;
+    e.preventDefault();
+    const paste = (e.clipboardData || window.clipboardData).getData("text");
+    const lines = paste.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim() !== "");
+    if (!lines.length) return;
+    const ri0 = +t.dataset.ri, m0 = +t.dataset.m, kind0 = t.dataset.kind;
+    for (let li = 0; li < lines.length; li++) {
+      const cols = lines[li].split(/\t/).map(c => c.trim());
+      for (let ci = 0; ci < cols.length; ci++) {
+        const targetRi = ri0 + li, targetM = m0 + ci;
+        if (targetRi >= entries.length || targetM >= 12) continue;
+        const targetEn = entries[targetRi];
+        if (targetEn.m[targetM].act) continue;
+        const raw = cols[ci]; if (raw === "" || isNaN(parseFloat(raw))) continue;
+        const v = parseFloat(raw);
+        const cell = mvFill ? ensureMgrCell(targetEn.key) : ensureCell(targetEn.rep, targetEn.key);
+        if (targetEn.qtyMode) { cell.q[targetM] = v; cell.a[targetM] = targetEn.asp > 0 ? v * targetEn.asp : v * 1000; }
+        else { cell.a[targetM] = v * 1000; cell.q[targetM] = targetEn.asp > 0 ? cell.a[targetM] / targetEn.asp : null; }
+        recalcEntry(targetEn);
+      }
+    }
+    renderFill(); renderCtx();
+    if (mvFill) saveMgrDoc(); else {
+      const reps = new Set(); for (let li = 0; li < lines.length; li++) { const tr = ri0 + li; if (tr < entries.length) reps.add(entries[tr].rep); }
+      for (const rep of reps) saveRepDoc(rep);
+    }
+    toast("已粘贴 " + lines.length + " 行");
+  });
+  /* 键盘方向键/Tab/Enter 在格子间移动 */
+  $$('.fc-in').forEach(inp => {
+    inp.addEventListener('keydown', e => {
+      const ri = +inp.dataset.ri, m = +inp.dataset.m;
+      let nextRi = ri, nextM = m;
+      if (e.key === 'ArrowRight') nextM = m + 1;
+      else if (e.key === 'ArrowLeft') nextM = m - 1;
+      else if (e.key === 'ArrowDown') nextRi = ri + 1;
+      else if (e.key === 'ArrowUp') nextRi = ri - 1;
+      else if (e.key === 'Tab') { if (e.shiftKey) nextM = m - 1; else nextM = m + 1; }
+      else if (e.key === 'Enter') nextRi = ri + 1;
+      else return;
+      if (nextM < 0 || nextM >= 12) return;
+      if (nextRi < 0 || nextRi >= entries.length) return;
+      e.preventDefault();
+      const nextInp = document.querySelector('.fc-in[data-ri="' + nextRi + '"][data-m="' + nextM + '"]');
+      if (nextInp) nextInp.focus();
+    });
+  });
+  /* 合理性校验: 负数、异常值(>AOP 5 倍)高亮 */
+  function validateInput(input, en, month) {
+    const raw = input.value.trim();
+    if (raw === '') { input.style.background = ''; input.style.borderColor = ''; return true; }
+    const v = parseFloat(raw);
+    if (v < 0) { input.style.background = 'var(--red-soft)'; return false; }
+    const aop = en.row ? en.row.aopA[month] : 0;
+    if (aop > 0 && Math.abs(v * 1000) > aop * 5) { input.style.background = 'var(--amber-soft)'; return false; }
+    input.style.background = ''; return true;
+  }
+  /* 大幅变动必须填备注(软约束: 边框琥珀色提示) */
+  function checkNoteRequired(input, en, month) {
+    if (en.rm && en.rm.trim()) { input.style.borderColor = ''; return false; }
+    const raw = input.value.trim(); if (raw === '') { input.style.borderColor = ''; return false; }
+    const v = parseFloat(raw);
+    const prevV = en.m[month] && en.m[month].a || 0;
+    const aop = en.row ? en.row.aopA[month] : 0;
+    if (prevV > 0 && Math.abs(v * 1000 - prevV) / prevV > 0.3) { input.style.borderColor = 'var(--amber)'; return true; }
+    if (aop > 0 && Math.abs(v * 1000 - aop) / aop > 0.5) { input.style.borderColor = 'var(--amber)'; return true; }
+    input.style.borderColor = ''; return false;
+  }
+  $$('.fc-in').forEach(inp => {
+    const en = entries[+inp.dataset.ri];
+    const month = +inp.dataset.m;
+    inp.addEventListener('input', () => { validateInput(inp, en, month); checkNoteRequired(inp, en, month); });
+  });
   /* 管理视图: 清空某格离开焦点时,输入框显示回代表原值(覆盖已撤销) */
   if (mvFill) $("#fill-body").addEventListener("change", e => {
     const t = e.target; if (!t.dataset || t.dataset.ri === undefined || t.dataset.kind === "rm") return;
@@ -1496,12 +1575,12 @@ function recalcEntry(e) {
 }
 function paintEntry(e) {
   const i = e._ri; if (i === undefined) return;
-  const set = (id, txt, cls) => { const el = $("#" + id); if (el) { el.textContent = txt; el.className = "num " + (cls || ""); } };
+  const set = (id, txt, cls) => { const el = $("#" + id); if (el) { el.innerHTML = txt; el.className = "num " + (cls || ""); } };
   const pe = calcEntryPeriod(e, S.period);
   const ach = pe.aop > 0 ? pe.fy / pe.aop : null, gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
   set("fy-" + i, fmtK(pe.fy), pe.fy ? "" : "dim");
   set("aop-" + i, fmtK(pe.aop));
-  set("ach-" + i, fmtPct(ach), clsAch(ach));
+  set("ach-" + i, achSymHtml(ach) + fmtPct(ach), clsAch(ach));
   set("gr-" + i, fmtPct(gr), clsSign(gr));
   const ver = S._fillVer, vr = verRowOf(ver, e.key);
   if (ver) {
@@ -1546,7 +1625,7 @@ function paintGroupSubs(entries, ver) {
     let h = '<td class="l stick1"><b>' + esc(grp) + '</b> 小计' + vtxt + '</td>';
     for (let i = 0; i < 12; i++) h += '<td class="num">' + fmtK(mm[i]) + '</td>';
     h += '<td class="l"></td>'; // 备注空列
-    h += '<td class="num"><b>' + fmtK(fy) + '</b></td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td>' +
+    h += '<td class="num"><b>' + fmtK(fy) + '</b></td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + '</td>' +
       '<td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + '</td>';
     if (ver) { let vfy = 0; for (const e of list) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) vfy += s; }
       const d = fy - vfy; const dfyPct = vfy > 0 ? d / vfy : null; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td class="num ' + clsSign(dfyPct) + '">' + (dfyPct === null ? "–" : fmtPct(dfyPct)) + '</td>'; }
@@ -1562,7 +1641,7 @@ function paintGroupSubs(entries, ver) {
   /* 备注 → 空td */
   h += '<td></td>';
   const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
-  h += '<td class="num">' + fmtK(fy) + '</td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + "</td>" +
+  h += '<td class="num">' + fmtK(fy) + '</td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</td>" +
     '<td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>";
   if (ver) { let vfy = 0; for (const e of entries) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) vfy += s; }
     const d = fy - vfy; const dfyPct = vfy > 0 ? d / vfy : null; h += '<td class="num">' + fmtK(vfy) + '</td><td class="num ' + clsSign(d) + '">' + fmtDK(d) + '</td><td class="num ' + clsSign(dfyPct) + '">' + (dfyPct === null ? "–" : fmtPct(dfyPct)) + '</td>'; }
@@ -1585,10 +1664,10 @@ function paintRepStats(entries, ver) {
   const acc = ver ? calcVerAccuracy(entries, ver, ms) : null;
   el.innerHTML =
     stat("YTD 实际达成", fmtPct(ytdP > 0 ? ytdA / ytdP : null), fmtK(ytdA) + " / " + fmtK(ytdP) + " K") +
-    stat("YTD Growth", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
+    stat("YTD实际 Growth", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
     stat(pLbl + "预估 (Act+FCST)", fmtK(fy) + "<span style='font-size:12px'> K</span>", "AOP " + fmtK(aop) + " K") +
-    stat(pLbl + "预估达成 Ach%", '<span class="' + clsAch(ach) + '">' + fmtPct(ach) + "</span>", aop > 0 ? "缺口 " + fmtK(aop - fy) + " K" : "无指标") +
-    stat("FY GR% vs FY" + S.cfg.ly, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年 " + fmtK(ly) + " K") +
+    stat(pLbl + "预估达成 Ach%", '<span class="' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</span>", aop > 0 ? "缺口 " + fmtK(aop - fy) + " K" : "无指标") +
+    stat(pLbl + " GR% vs FY" + S.cfg.ly, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年 " + fmtK(ly) + " K") +
     (ver ? stat("VS上次预估版本", '<span class="' + clsSign(d) + '">' + (d === null ? "–" : fmtDK(d)) + " K</span>", esc(latestVerMeta().label)) : "") +
     (ver ? stat('<span style="color:var(--blue)">📊 预估准确率(上版vs实际)</span>',
       acc ? '<span class="' + accCls(acc.acc) + '">' + fmtPct(acc.acc) + "</span>" : '<span style="color:var(--mute)">–</span>',
@@ -1648,7 +1727,111 @@ function openAddRow() {
 }
 
 /* =====================================================================
-   ② 数据看板
+   ② 提报进度看板
+   ===================================================================== */
+function renderProgress() {
+  const host = $("#tab-progress");
+  if (!S.master || !S.cfg) {
+    host.innerHTML = '<div class="card"><div class="empty"><b>还没有数据</b>请先在「管理后台」导入系统导出文件。</div></div>';
+    return;
+  }
+  const entries = scopedEntries();
+  const reps = scopeReps();
+
+  const repStatus = [];
+  for (const rep of reps) {
+    const repEntries = entries.filter(e => e.rep === rep);
+    /* 提交进度始终按「全年开口月」衡量,不随填写页当前期间(Q1/H1/YTD…)而变 */
+    const pe = calcEntriesPeriod(repEntries, "FY");
+    const doc = S.fcs.get(rep);
+    const lastUpdate = doc ? doc.updatedAt : 0;
+    const completed = pe.openTotal > 0 ? Math.round(pe.openFilled / pe.openTotal * 100) : 100;
+    const isSubmitted = completed >= 100;
+    repStatus.push({
+      rep, dsm: (S.repInfo.get(rep) || {}).dsm || "未分配",
+      rsm: (S.repInfo.get(rep) || {}).rsm || "未分配",
+      lastUpdate, completed, isSubmitted,
+      openFilled: pe.openFilled, openTotal: pe.openTotal
+    });
+  }
+
+  /* 按 DSM 分组 */
+  const byDsm = new Map();
+  for (const r of repStatus) {
+    if (!byDsm.has(r.dsm)) byDsm.set(r.dsm, []);
+    byDsm.get(r.dsm).push(r);
+  }
+
+  /* 整体汇总 */
+  const totalReps = repStatus.length;
+  const totalSubmitted = repStatus.filter(r => r.isSubmitted).length;
+  const overallPct = totalReps ? Math.round(totalSubmitted / totalReps * 100) : 0;
+  const pctCls = p => p >= 100 ? "pos" : p >= 80 ? "warn" : "neg";
+
+  let html = '<div class="card"><div class="card-h"><h3>📋 提报进度看板</h3>' +
+    '<span class="hint">按 DSM 分组显示每位代表的提交状态、完成度与最后更新时间。完成度按全年开口月衡量。</span>' +
+    '<button class="btn sm pri" id="exp-unsub" style="margin-left:auto">⬇ 导出未交名单</button></div>' +
+    '<div class="card-b" style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end">' +
+      '<div><small style="color:var(--mute)">已提交 / 总人数</small><div class="num" style="font-size:22px;font-weight:700;line-height:1.2">' + totalSubmitted + ' / ' + totalReps + '</div></div>' +
+      '<div><small style="color:var(--mute)">整体提交率</small><div class="num ' + pctCls(overallPct) + '" style="font-size:22px;font-weight:700;line-height:1.2">' + overallPct + '%</div></div>' +
+      '<div><small style="color:var(--mute)">DSM 团队数</small><div class="num" style="font-size:22px;font-weight:700;line-height:1.2">' + byDsm.size + '</div></div>' +
+    '</div></div>';
+
+  if (totalReps === 0) {
+    html += '<div class="card"><div class="empty">当前身份范围内没有代表。</div></div>';
+    host.innerHTML = html;
+    return;
+  }
+
+  /* 每个 DSM 一张独立卡片 */
+  const dsmList = [...byDsm.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh"));
+  for (const [dsm, listRaw] of dsmList) {
+    /* 组内排序: 未提交在前 → 完成度低在前 → 姓名,便于催办 */
+    const list = listRaw.slice().sort((a, b) =>
+      (Number(a.isSubmitted) - Number(b.isSubmitted)) || (a.completed - b.completed) || a.rep.localeCompare(b.rep, "zh"));
+    const sub = list.filter(r => r.isSubmitted).length;
+    const teamPct = list.length ? Math.round(sub / list.length * 100) : 0;
+    html += '<div class="card"><div class="card-h">' +
+      '<h3>👥 ' + esc(dsm) + '</h3>' +
+      '<span class="hint">已提交 ' + sub + ' / ' + list.length + ' 人</span>' +
+      '<span class="num ' + pctCls(teamPct) + '" style="margin-left:auto;font-size:15px;font-weight:700">' + teamPct + '%</span>' +
+      '</div>' +
+      '<div class="twrap"><table class="dt"><thead><tr>' +
+      '<th class="l stick1">代表</th><th>提交状态</th><th>完成度</th><th>已填 / 应填</th><th>最后更新</th>' +
+      '</tr></thead><tbody>';
+    for (const r of list) {
+      html += '<tr>' +
+        '<td class="l stick1">' + esc(r.rep) + '</td>' +
+        '<td class="num ' + (r.isSubmitted ? 'pos' : 'neg') + '">' + (r.isSubmitted ? '已提交' : '未提交') + '</td>' +
+        '<td class="num ' + (r.completed >= 100 ? 'pos' : (r.completed >= 80 ? 'warn' : 'neg')) + '">' + r.completed + '%</td>' +
+        '<td class="num">' + r.openFilled + ' / ' + r.openTotal + '</td>' +
+        '<td class="num">' + (r.lastUpdate ? dt(r.lastUpdate) : '–') + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table></div></div>';
+  }
+
+  host.innerHTML = html;
+  $("#exp-unsub").onclick = () => exportUnsubXlsx(repStatus);
+}
+
+function exportUnsubXlsx(repStatus) {
+  if (typeof XLSX === "undefined") { toast("Excel 组件未加载"); return; }
+  const unsub = repStatus.filter(r => !r.isSubmitted)
+    .sort((a, b) => a.dsm.localeCompare(b.dsm, "zh") || a.completed - b.completed || a.rep.localeCompare(b.rep, "zh"));
+  if (!unsub.length) { toast("所有代表已提交，无需催办"); return; }
+  const aoa = [["DSM", "代表", "完成度", "已填/应填", "最后更新"]];
+  for (const r of unsub) {
+    aoa.push([r.dsm, r.rep, r.completed + "%", r.openFilled + "/" + r.openTotal, r.lastUpdate ? dt(r.lastUpdate) : "–"]);
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "未交名单");
+  XLSX.writeFile(wb, "未交名单_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".xlsx");
+  toast("已导出未交名单 " + unsub.length + " 人");
+}
+
+/* =====================================================================
+   ③ 数据看板
    ===================================================================== */
 async function renderDash() {
   const host = $("#tab-dash");
@@ -1805,14 +1988,10 @@ async function renderDash() {
     td: c => '<td class="num">' + vK(c.aopV) + "</td>",
     tt: () => '<td class="num">' + vK(tAopV) + "</td>" });
   C.push({ id: "ach", label: pShort + " Ach%", sv: c => c.achV,
-    td: c => '<td class="num ' + clsAch(c.achV) + '">' + fmtPct(c.achV) + "</td>",
-    tt: () => '<td class="num ' + clsAch(tAch) + '">' + fmtPct(tAch) + "</td>" });
-  C.push({ id: "ly", label: S.cfg.ly + pShort, sv: c => c.lyV,
-    td: c => '<td class="num">' + vK(c.lyV) + "</td>",
-    tt: () => '<td class="num">' + vK(tLyV) + "</td>" });
-  C.push({ id: "gr", label: pShort + " GR%", sv: c => c.grV,
-    td: c => '<td class="num ' + clsSign(c.grV) + '">' + fmtPct(c.grV) + "</td>",
-    tt: () => '<td class="num ' + clsSign(tGr) + '">' + fmtPct(tGr) + "</td>" });
+    td: c => '<td class="num ' + clsAch(c.achV) + '">' + achSymHtml(c.achV) + fmtPct(c.achV) + "</td>",
+    tt: () => '<td class="num ' + clsAch(tAch) + '">' + achSymHtml(tAch) + fmtPct(tAch) + "</td>" });
+  
+  
   if (ver) {
     C.push({ id: "vfy", label: "\u4e0a\u7248" + pShort, sv: c => c.isNew ? null : c.vfy,
       td: c => c.isNew ? '<td class="num dim">\u65b0\u589e</td>' : '<td class="num">' + vK(c.vfy) + "</td>",
@@ -1825,9 +2004,7 @@ async function renderDash() {
     C.push({ id: "dach", label: "\u0394Ach", sv: c => c.dach,
       td: c => c.isNew ? "<td>\u2013</td>" : '<td class="num ' + clsSign(c.dach) + '">' + fmtPP(c.dach) + "</td>",
       tt: () => "<td></td>" });
-    C.push({ id: "dgr", label: "\u0394GR", sv: c => c.dgr,
-      td: c => c.isNew ? "<td>\u2013</td>" : '<td class="num ' + clsSign(c.dgr) + '">' + fmtPP(c.dgr) + "</td>",
-      tt: () => "<td></td>" });
+
   }
   C.push({ id: "prog", label: "\u586b\u5199\u8fdb\u5ea6", sv: c => c.prog,
     td: c => '<td class="num ' + (c.prog === 100 ? "pos" : c.prog === 0 ? "dim" : "warn") + '">' + c.prog + "%</td>",
@@ -2059,7 +2236,7 @@ function dashDetail(r, ver, isAmt, d, dp, colCount) {
   const pShort = periodShort(dp || "FY");
   const cols = colCount || (1 + (d.months ? 12 : 0) + 8 + (ver ? 4 : 0) + 2);
   let h = '<tr><td colspan="' + cols + '" style="background:#FBFCFE;padding:8px 14px 12px">' +
-    '<table class="dt" style="font-size:12px"><thead><tr><th class="l">\u4ee3\u8868</th><th class="l">\u7701\u4efd</th><th class="l">\u4ea7\u54c1\u7ec4</th><th>' + pShort + '\u9884\u4f30</th><th>AOP</th><th>Ach%</th><th>GR%</th>' + (ver ? '<th title="\u5b9e\u9645 \u2212 \u4e0a\u7248\u9884\u4f30(\u65b0\u5173\u8d26\u6708)">预估差异</th><th title="\u9884\u4f30\u51c6\u786e\u7387 = 1 \u2212 |\u5b9e\u9645\u2212\u9884\u4f30| \u00f7 \u5b9e\u9645">准确率%</th><th>\u4e0a\u7248' + pShort + '</th><th>\u0394' + pShort + '</th>' : "") + '<th class="l">\u5907\u6ce8</th><th class="l">\u7ba1\u7406\u5907\u6ce8</th></tr></thead><tbody>';
+    '<table class="dt" style="font-size:12px"><thead><tr><th class="l">\u4ee3\u8868</th><th class="l">\u7701\u4efd</th><th class="l">\u4ea7\u54c1\u7ec4</th><th>' + pShort + '\u9884\u4f30</th><th>AOP</th><th>Ach%</th>' + (ver ? '<th title="\u5b9e\u9645 \u2212 \u4e0a\u7248\u9884\u4f30(\u65b0\u5173\u8d26\u6708)">预估差异</th><th title="\u9884\u4f30\u51c6\u786e\u7387 = 1 \u2212 |\u5b9e\u9645\u2212\u9884\u4f30| \u00f7 \u5b9e\u9645">准确率%</th><th>\u4e0a\u7248' + pShort + '</th><th>\u0394' + pShort + '</th>' : "") + '<th class="l">\u5907\u6ce8</th><th class="l">\u7ba1\u7406\u5907\u6ce8</th></tr></thead><tbody>';
   for (const e of r.items.sort((a, b) => b.fy - a.fy)) {
     const pe = calcEntryPeriod(e, dp || "FY");
     const ach = pe.aop > 0 ? pe.fy / pe.aop : null, gr = pe.ly > 0 ? pe.fy / pe.ly - 1 : null;
@@ -2068,7 +2245,7 @@ function dashDetail(r, ver, isAmt, d, dp, colCount) {
     const dlt = vfy === null ? null : pe.fy - vfy;
     const eAcc = ver ? calcVerAccuracyForItems([e], ver, ms) : null;
     h += '<tr><td class="l">' + esc(e.rep) + '</td><td class="l">' + esc(e.prov) + '</td><td class="l">' + esc(e.grp) + (e.manual ? '<span class="tag new">\u65b0\u589e</span>' : "") + (e.ovCount ? '<span class="tag ovr" title="\u7ba1\u7406\u5c42\u8c03\u6574\u4e86 ' + e.ovCount + ' \u4e2a\u6708">\u8c03\u6574' + e.ovCount + '</span>' : "") + "</td>" +
-      '<td class="num">' + fmtK(pe.fy) + '</td><td class="num">' + fmtK(pe.aop) + '</td><td class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</td><td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>" +
+      '<td class="num">' + fmtK(pe.fy) + '</td><td class="num">' + fmtK(pe.aop) + '</td><td class="num ' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</td>" +
       (ver ? '<td class="num diff-cell ' + (eAcc ? clsSign(eAcc.diff) : "") + '">' + (eAcc ? fmtDK(eAcc.diff) : "\u2013") + '</td>' +
         '<td class="num diff-cell ' + (eAcc ? accCls(eAcc.acc) : "") + '">' + (eAcc ? fmtPct(eAcc.acc) : "\u2013") + '</td>' +
         '<td class="num">' + (vfy !== null ? fmtK(vfy) : "\u2013") + '</td><td class="num ' + clsSign(dlt) + '">' + (dlt === null ? "\u65b0\u589e" : fmtDK(dlt)) + "</td>" : "") +
@@ -2118,7 +2295,7 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
   const msX = getPeriodMonths(dp);
   const pS = periodShort(dp);
   const actSetX = new Set(S.cfg.actMonths || []);
-  const head1 = [dimDefs[d.dim].name, "YTD Ach%", pS + "预估K", pS + " AOP K", "Ach%", S.cfg.ly + pS + " K", "GR%", "预估差异K", "预估准确率%", "上版" + pS + " K", "Δ" + pS + " K", "ΔAch pp", "ΔGR pp", "填写进度%", "备注条数", "管理备注"];
+  const head1 = [dimDefs[d.dim].name, "YTD Ach%", pS + "预估K", pS + " AOP K", "Ach%", "预估差异K", "预估准确率%", "上版" + pS + " K", "Δ" + pS + " K", "ΔAch pp", "填写进度%", "备注条数", "管理备注"];
   const aoa1 = [["周期", S.cfg.cycleLabel, "期间", pS, "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
   const vRoll = ver ? rollupVer(ver, d.dim, d.rsm, msX, makeDashVerPred(d)) : null;
   for (const r of rows) {
@@ -2128,20 +2305,20 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
     const vr = vRoll ? vRoll.get(r.dim) : null;
     const vach = vr && rAop > 0 ? vr.fy / rAop : null, vgr = vr && rLy > 0 ? vr.fy / rLy - 1 : null;
     const rAcc = ver ? calcVerAccuracyForItems(r.items, ver, msX) : null;
-    aoa1.push([r.dim, P(ytdAop > 0 ? ytdAct / ytdAop : null), K(rFy), K(rAop), P(ach), K(rLy), P(gr),
+    aoa1.push([r.dim, P(ytdAop > 0 ? ytdAct / ytdAop : null), K(rFy), K(rAop), P(ach),
       rAcc ? K(rAcc.diff) : null, rAcc ? P(rAcc.acc) : null,
       vr ? K(vr.fy) : null, vr ? K(rFy - vr.fy) : null,
-      ach !== null && vach !== null ? P(ach - vach) : null, gr !== null && vgr !== null ? P(gr - vgr) : null,
+      ach !== null && vach !== null ? P(ach - vach) : null,
       r.openTotal ? Math.round(r.openFilled / r.openTotal * 100) : 100, r.rms.length, getDashComment(d.dim + "|" + r.dim)]);
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), "汇总-" + dimDefs[d.dim].name.slice(0, 4));
   /* 明细 */
-  const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " K"), "FY预估K", "FY AOP K", "Ach%", "FY" + S.cfg.ly + " K", "GR%", "预估差异K", "预估准确率%", "上版FY K", "ΔFY K", "FY代表原始K", "管理调整月数", "备注", "管理备注"]];
+  const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " K"), "FY预估K", "FY AOP K", "Ach%", "预估差异K", "预估准确率%", "上版FY K", "ΔFY K", "FY代表原始K", "管理调整月数", "备注", "管理备注"]];
   for (const e of entries.slice().sort((a, b) => a.rsm.localeCompare(b.rsm, "zh") || a.rep.localeCompare(b.rep, "zh") || b.fy - a.fy)) {
     const vr = verRowOf(ver, e.key);
     const eAcc = ver ? calcVerAccuracyForItems([e], ver, msX) : null;
     aoa2.push([e.rsm, e.dsm, e.rep, e.prov, e.grp, ...e.m.map(c => K(c.a)),
-      K(e.fy), K(e.aop), P(e.aop > 0 ? e.fy / e.aop : null), K(e.ly), P(e.ly > 0 ? e.fy / e.ly - 1 : null),
+      K(e.fy), K(e.aop), P(e.aop > 0 ? e.fy / e.aop : null),
       eAcc ? K(eAcc.diff) : null, eAcc ? P(eAcc.acc) : null,
       vr ? K(vr.fy) : null, vr ? K(e.fy - vr.fy) : null,
       K(e.m.reduce((s, c, i) => s + entryRepA(e, i), 0)), e.ovCount || 0, e.rm || "", getDashComment("entry|" + e.key)]);
@@ -2740,8 +2917,9 @@ function openDelVersion(id) {
 }
 
 /* =================== 同步 / 备份 / 离线接力 =================== */
-function exportRepFile() {
+async function exportRepFile() {
   const rep = S.curRep; if (!rep) { toast("请先选择代表"); return; }
+  await flushDirtyReps(false);  /* 落盘并刷新 updatedAt,避免对方导入时被旧时间戳判为「本机更新」而跳过 */
   const doc = S.fcs.get(rep) || ensureDoc(rep);
   downloadJSON("预估_" + rep.replace(/[\\/:*?"<>|]/g, "_") + "_" + stamp() + ".json", { kind: "fc-rep", exportedAt: Date.now(), doc });
   toast("已导出「" + rep + "」的预估文件,请发给管理员汇总");
@@ -2772,9 +2950,10 @@ async function importRepFiles(files) {
 }
 
 /* =================== 代表预估 Excel 导出(可读 + 隐藏无损数据) =================== */
-function exportRepXlsx() {
+async function exportRepXlsx() {
   const rep = S.curRep; if (!rep) { toast("请先选择代表"); return; }
   if (typeof XLSX === "undefined") { toast("Excel 组件未加载(需联网加载一次后再导出)"); return; }
+  await flushDirtyReps(false);  /* 落盘并刷新 updatedAt,确保导出的隐藏数据与时间戳一致 */
   const doc = S.fcs.get(rep) || ensureDoc(rep);
   const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
   const ents = buildEntries().filter(e => e.rep === rep)
@@ -2902,12 +3081,16 @@ async function importRepXlsxFiles(files) {
   toast("Excel 合并完成: 更新 " + ok + " 人" + (skip ? " · 跳过 " + skip + "(本机更新)" : "") + (recon ? " · 兼容还原 " + recon : "") + (bad ? " · 失败 " + bad : ""));
 }
 async function exportPackage() {
-  if (!S.master) { toast("没有可导出的数据"); return; }
+  if (!S.master || !S.cfg) { toast("没有可导出的数据"); return; }
+  /* 先把尚在防抖队列里的代表填写 / 管理调整落盘并刷新 updatedAt,
+     否则刚输入、未保存的数据虽在内存中,导出时其 updatedAt 仍是旧值,
+     被对方导入/云端合并时可能因「本地更新」判定而被跳过,造成数据遗漏。 */
+  await flushDirtyReps(false);
   const versions = [];
   for (const v of (S.cfg.versions || [])) { const full = await getVersion(v.id); if (full) versions.push(full); }
   const pw = await Passwords.export();
   downloadJSON("预估数据包_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".json",
-    { kind: "fc-package", exportedAt: Date.now(), cfg: S.cfg, master: S.master, forecasts: [...S.fcs.values()], versions, passwords: pw, dashComments: S.dashComments, mgrAdjust: S.mgr });
+    { kind: "fc-package", exportedAt: Date.now(), cfg: S.cfg, master: S.master, forecasts: [...S.fcs.values()], versions, passwords: pw, dashComments: S.dashComments || {}, mgrAdjust: S.mgr || { updatedAt: 0, rows: {} } });
   toast("数据包已导出");
 }
 async function importPackage(file) {
@@ -2917,6 +3100,7 @@ async function importPackage(file) {
     try { d = JSON.parse(raw); } catch (pe) { toast("⚠ JSON 解析失败,文件可能不是有效 JSON: " + pe.message); return; }
     if (!d || !d.kind || d.kind !== "fc-package") { toast("⚠ 文件格式不对 (缺少 kind='fc-package'),请确认是「管理后台 → 导出数据包」生成的 JSON 文件"); return; }
     if (!d.master) { toast("⚠ 数据包缺少主数据(master),可能导出时数据未加载"); return; }
+    if (!d.cfg) { toast("⚠ 数据包缺少配置(cfg),文件可能不完整,请让管理员重新导出"); return; }
     await Store.set("fc-cfg", d.cfg); await Store.set("fc-master", d.master);
     if (d.dashComments) { await Store.set("fc-dash-comments", d.dashComments); S.dashComments = d.dashComments; }
     if (d.mgrAdjust) await Store.set("fc-mgr", d.mgrAdjust);
@@ -3395,7 +3579,7 @@ function rerender() {
   const bu = S.master && S.master.meta && S.master.meta.bu;
   $("#bu-tag").textContent = (bu ? bu + " · " : "") + "月度滚动预估";
   renderCtx();
-  if (S.tab === "fill") renderFill(); else if (S.tab === "dash") renderDash(); else renderAdmin();
+  if (S.tab === "fill") renderFill(); else if (S.tab === "progress") renderProgress(); else if (S.tab === "dash") renderDash(); else renderAdmin();
 }
 function switchTab(t) {
   if (t === "admin" && !(S.me && S.me.role === "admin")) { renderGate(); return; }
@@ -3404,6 +3588,7 @@ function switchTab(t) {
   S.tab = t;
   $$(".tabs .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("#tab-fill").style.display = t === "fill" ? "" : "none";
+  $("#tab-progress").style.display = t === "progress" ? "" : "none";
   $("#tab-dash").style.display = t === "dash" ? "" : "none";
   $("#tab-admin").style.display = t === "admin" ? "" : "none";
   rerender();
