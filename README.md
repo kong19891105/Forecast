@@ -1,1 +1,1 @@
-Uro forecast tool, contact Kong if any problems.
+forecast tool, contact Kong if any problems.
