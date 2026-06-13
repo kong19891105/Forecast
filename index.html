@@ -495,6 +495,7 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
   </nav>
   <div class="bar-right">
     <button class="icon-btn" id="btn-me" title="切换身份 / 可见范围">👤 选择身份</button>
+    <button class="icon-btn" id="btn-help" title="查看使用手册">📖 使用手册</button>
     <button class="icon-btn" id="btn-chgpwd" title="修改我的登录密码" style="display:none">🔒 修改密码</button>
     <span class="sync-badge" id="sync-badge">本地模式</span>
     <button class="icon-btn" id="btn-cloud" title="从 GitHub 拉取最新数据包" style="display:none">☁ 云端同步</button>
@@ -524,6 +525,7 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 <input type="file" id="file-xlsx" accept=".xlsx,.xls,.csv" style="display:none">
 <input type="file" id="file-pkg" accept=".json" style="display:none">
 <input type="file" id="file-reps" accept=".json" multiple style="display:none">
+<input type="file" id="file-reps-xlsx" accept=".xlsx,.xls" multiple style="display:none">
 
 <script>
 /* =====================================================================
@@ -1296,7 +1298,7 @@ async function renderFill() {
     '<button class="btn sm danger" id="qf-clear">' + (mvFill ? "撤销全部管理调整" : "清空我的全部预估") + '</button>' +
     '<span style="flex:1"></span>' +
     (S.fillMode === "rep" || !S.fillMode ? '<button class="btn sm" id="add-row">＋ 新增产品/省份行</button>' : "") +
-    (!Store.shared && (S.fillMode === "rep" || !S.fillMode) ? '<button class="btn sm pri" id="exp-rep">⬇ 导出我的预估文件</button>' : "") +
+    (!Store.shared && (S.fillMode === "rep" || !S.fillMode) ? '<button class="btn sm pri" id="exp-rep">⬇ 导出我的预估(Excel)</button>' : "") +
     "</div></div>";
 
   /* —— 月度趋势图(随输入实时更新) —— */
@@ -1445,7 +1447,7 @@ async function renderFill() {
     $("#qfc-ok").onclick = () => { closeModal(); quickFill("clear"); };
   };
   if ($("#add-row")) $("#add-row").onclick = openAddRow;
-  $("#exp-rep") && ($("#exp-rep").onclick = exportRepFile);
+  $("#exp-rep") && ($("#exp-rep").onclick = exportRepXlsx);
 
   for (const e of entries) recalcEntry(e), paintEntry(e);
   paintRepStats(entries, ver); paintGroupSubs(entries, ver); paintFillChart(entries);
@@ -2196,6 +2198,443 @@ function downloadJSON(name, obj) {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
 }
 
+/* =================== 内嵌使用手册 =================== */
+const MANUAL_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>预估填写工具 · 使用手册</title>
+<style>
+  :root{
+    --ink:#152235; --ink2:#354764; --mute:#6E7E96;
+    --paper:#F2F4F8; --card:#FFFFFF; --line:#E1E5ED; --line2:#C8CFDB;
+    --blue:#2054E0; --blue-soft:#EDF3FF; --blue-line:#B2CBF8;
+    --green:#0D7F56; --green-soft:#E8F5EF;
+    --red:#B8322B; --red-soft:#FAECEA;
+    --amber:#9E6200; --amber-soft:#FBF2E0;
+    --r:14px; --r-sm:9px;
+    --sans:"PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    font-feature-settings:"tnum" 1;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:0 20px 64px}
+
+  /* ---------- header ---------- */
+  header.hero{background:linear-gradient(135deg,var(--ink),#1A2E4A);color:#fff;
+    border-radius:0 0 26px 26px;padding:40px 20px 30px;margin-bottom:30px}
+  .hero-in{max-width:920px;margin:0 auto;padding:0 4px}
+  .eyebrow{font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:#9DB6E8;font-weight:700;margin-bottom:10px}
+  .hero h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.01em;line-height:1.2}
+  .hero p{margin:12px 0 0;color:#C4D2EC;font-size:14.5px;max-width:640px}
+  .role-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .role-chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:6px 13px 6px 8px;
+    font-size:12.5px;font-weight:600;color:#EAF0FB}
+  .dot{width:16px;height:16px;border-radius:50%;display:inline-block;flex:none}
+  .dot.b{background:#5B8DEF} .dot.g{background:#3FA980} .dot.a{background:#D79A3B}
+
+  /* ---------- generic ---------- */
+  h2{font-size:13px;letter-spacing:.04em;color:var(--mute);font-weight:700;
+    text-transform:none;margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line2);
+    display:flex;align-items:center;gap:9px}
+  h2 .ix{font-size:12px;font-weight:800;color:var(--blue);background:var(--blue-soft);
+    border:1px solid var(--blue-line);border-radius:6px;padding:1px 7px;letter-spacing:0}
+  p.lead{font-size:14.5px;color:var(--ink2);margin:0 0 4px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:20px 22px;margin:0 0 16px;box-shadow:0 1px 2px rgba(21,34,53,.04)}
+
+  /* split: text + illustration */
+  .split{display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start}
+  @media(max-width:720px){.split{grid-template-columns:1fr}}
+
+  /* numbered steps */
+  ol.steps{list-style:none;counter-reset:s;margin:6px 0 0;padding:0}
+  ol.steps li{counter-increment:s;position:relative;padding:7px 0 7px 38px;
+    font-size:13.5px;color:var(--ink2);border-bottom:1px dashed var(--line)}
+  ol.steps li:last-child{border-bottom:none}
+  ol.steps li::before{content:counter(s);position:absolute;left:0;top:7px;
+    width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;
+    font-size:12px;font-weight:700;display:grid;place-items:center}
+  ol.steps b{color:var(--ink)}
+  .kbtn{display:inline-block;background:var(--blue);color:#fff;border-radius:6px;
+    padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+  .kbtn.gh{background:#fff;color:var(--ink2);border:1px solid var(--line2)}
+
+  /* legend list */
+  .legend{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;margin:4px 0 0}
+  @media(max-width:560px){.legend{grid-template-columns:1fr}}
+  .legend div{font-size:13px;color:var(--ink2);display:flex;gap:9px;align-items:baseline;
+    padding:3px 0}
+  .sw{flex:none;width:26px;height:16px;border-radius:4px;border:1px solid var(--line2);margin-top:2px}
+  .sw.blue{background:var(--blue-soft);border-color:var(--blue-line)}
+  .sw.gray{background:#EBEEF5}
+  .sw.amber{background:var(--amber-soft);border-color:#E6CB8E}
+  .sw.green{background:var(--green-soft);border-color:#A9D8C2}
+  .sw.red{background:var(--red-soft);border-color:#E6BEB9}
+
+  /* role cards */
+  .role{border-left:5px solid var(--blue)}
+  .role.dsm{border-left-color:var(--green)}
+  .role.rsm{border-left-color:var(--amber)}
+  .role-head{display:flex;align-items:center;gap:12px;margin:0 0 4px}
+  .role-head h3{margin:0;font-size:18px;font-weight:800}
+  .badge{font-size:11.5px;font-weight:700;border-radius:999px;padding:3px 11px}
+  .badge.b{background:var(--blue-soft);color:var(--blue);border:1px solid var(--blue-line)}
+  .badge.g{background:var(--green-soft);color:var(--green);border:1px solid #A9D8C2}
+  .badge.a{background:var(--amber-soft);color:var(--amber);border:1px solid #E6CB8E}
+  .see{font-size:13px;color:var(--mute);margin:2px 0 12px}
+  .see b{color:var(--ink2)}
+
+  /* flow */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .fstep{flex:1;min-width:120px;background:var(--blue-soft);border:1px solid var(--blue-line);
+    border-radius:10px;padding:12px 10px;text-align:center;font-size:12.5px;color:var(--ink);font-weight:600}
+  .fstep small{display:block;color:var(--mute);font-weight:500;margin-top:3px;font-size:11px}
+  .farrow{display:grid;place-items:center;color:var(--blue);font-size:20px;padding:0 6px}
+  @media(max-width:620px){.flow{flex-direction:column}.farrow{transform:rotate(90deg);padding:4px 0}}
+
+  /* tips */
+  ul.tips{margin:4px 0 0;padding-left:0;list-style:none}
+  ul.tips li{font-size:13.5px;color:var(--ink2);padding:6px 0 6px 24px;position:relative;
+    border-bottom:1px dashed var(--line)}
+  ul.tips li:last-child{border-bottom:none}
+  ul.tips li::before{content:"›";position:absolute;left:6px;top:5px;color:var(--blue);font-weight:800;font-size:15px}
+
+  .note{background:var(--green-soft);border:1px solid #A9D8C2;border-radius:10px;
+    padding:11px 14px;font-size:12.5px;color:#0B5F41;margin-top:12px}
+  .note b{color:#094a33}
+
+  figcaption{font-size:11.5px;color:var(--mute);text-align:center;margin-top:7px}
+  figure{margin:0}
+  svg{display:block;width:100%;height:auto}
+
+  footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line2);
+    font-size:12px;color:var(--mute);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+
+  @media print{
+    body{background:#fff}
+    header.hero{border-radius:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .card,.fstep,.badge,.kbtn,.sw,.note,.dot{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .card{break-inside:avoid;box-shadow:none}
+    h2{break-after:avoid}
+    .role{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-in">
+    <div class="eyebrow">用户使用手册 · 销售预估填写工具</div>
+    <h1>三分钟学会:登录 · 填写 · 汇总</h1>
+    <p>各代表在线按「省份 × 产品组」逐月填写本年金额或数量预估,导出 Excel 邮件发给管理员汇总;经理与大区在看板查看团队与全局。打开链接即用,无需安装。</p>
+    <div class="role-chips">
+      <span class="role-chip"><span class="dot b"></span>代表 · 填自己的预估</span>
+      <span class="role-chip"><span class="dot g"></span>经理 DSM · 看本团队</span>
+      <span class="role-chip"><span class="dot a"></span>大区 RSM · 看全局</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- 通用流程 -->
+  <h2><span class="ix">通用</span>无论哪个角色,都是这三步</h2>
+  <div class="card">
+    <div class="flow">
+      <div class="fstep">① 选择身份<small>右上角 👤,选角色+输密码</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">② 填写 / 查看<small>代表填预估;经理大区看看板</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">③ 导出并邮件发送<small>导出 Excel,邮件发给管理员</small></div>
+    </div>
+    <div class="note">本工具的提交方式:大家<b>在线填写</b> → <b>导出预估 Excel</b> → 通过<b>邮件</b>发给管理员汇总。下面按这一流程说明。</div>
+  </div>
+
+  <!-- 第一步 登录 -->
+  <h2><span class="ix">第 1 步</span>登录:选择你的身份</h2>
+  <div class="card">
+    <div class="split">
+      <div>
+        <p class="lead">点页面右上角的 <span class="kbtn gh">👤 选择身份</span>,弹出下面这张卡:</p>
+        <ol class="steps">
+          <li>在顶部页签里选你的角色:<b>销售代表 / DSM / RSM</b>。</li>
+          <li>在「我的姓名」下拉里<b>选自己</b>的姓名(或岗位号)。</li>
+          <li>输入密码:代表用<b>管理员发给你的本人登录密码</b>;DSM / RSM 用<b>个人密码</b>。<br><b style="color:var(--red)">为了保证您的数据安全,第一次登录时请务必修改密码并牢记</b>(右上角 <span class="kbtn gh">🔒 修改密码</span>)。</li>
+          <li>点 <span class="kbtn">进入</span>。身份会<b>记在本设备</b>,下次打开自动进入。</li>
+        </ol>
+        <p class="see" style="margin-top:10px">忘记密码只能找管理员重置(密码加密保存,无法找回)。</p>
+      </div>
+      <figure>
+        <!-- login mockup -->
+        <svg viewBox="0 0 300 230" role="img" aria-label="选择身份登录卡示意">
+          <rect x="1" y="1" width="298" height="228" rx="14" fill="#fff" stroke="#C8CFDB"/>
+          <text x="20" y="30" font-size="14" font-weight="800" fill="#152235" font-family="sans-serif">选择身份</text>
+          <line x1="20" y1="42" x2="280" y2="42" stroke="#E1E5ED"/>
+          <!-- segmented tabs -->
+          <rect x="20" y="56" width="260" height="30" rx="8" fill="#fff" stroke="#C8CFDB"/>
+          <rect x="20" y="56" width="78" height="30" rx="8" fill="#152235"/>
+          <text x="59" y="75" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle" font-family="sans-serif">销售代表</text>
+          <text x="135" y="75" font-size="11.5" fill="#354764" text-anchor="middle" font-family="sans-serif">DSM</text>
+          <text x="192" y="75" font-size="11.5" fill="#354764" text-anchor="middle" font-family="sans-serif">RSM</text>
+          <text x="252" y="75" font-size="11.5" fill="#354764" text-anchor="middle" font-family="sans-serif">管理员</text>
+          <!-- name select -->
+          <text x="20" y="108" font-size="10" font-weight="700" fill="#6E7E96" font-family="sans-serif">我的姓名</text>
+          <rect x="20" y="114" width="260" height="30" rx="8" fill="#fff" stroke="#C8CFDB"/>
+          <text x="30" y="133" font-size="12" fill="#152235" font-family="sans-serif">张三 · 江苏</text>
+          <path d="M262 125 l6 7 6 -7" fill="none" stroke="#6E7E96" stroke-width="1.6"/>
+          <!-- password -->
+          <text x="20" y="166" font-size="10" font-weight="700" fill="#6E7E96" font-family="sans-serif">张三 的登录密码</text>
+          <rect x="20" y="172" width="260" height="30" rx="8" fill="#fff" stroke="#B2CBF8"/>
+          <circle cx="32" cy="187" r="2.4" fill="#354764"/><circle cx="41" cy="187" r="2.4" fill="#354764"/>
+          <circle cx="50" cy="187" r="2.4" fill="#354764"/><circle cx="59" cy="187" r="2.4" fill="#354764"/>
+          <!-- enter btn -->
+          <rect x="208" y="172" width="72" height="30" rx="8" fill="#2054E0"/>
+          <text x="244" y="191" font-size="12" font-weight="700" fill="#fff" text-anchor="middle" font-family="sans-serif">进入</text>
+        </svg>
+        <figcaption>右上角 👤 → 选角色 → 选姓名 → 输密码 → 进入</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- 第二步 读懂填写页 -->
+  <h2><span class="ix">第 2 步</span>读懂填写页(所有角色通用)</h2>
+  <div class="card">
+    <div class="split">
+      <div>
+        <p class="lead">填写页是一张按月份排列的表。认准这几种颜色就会用:</p>
+        <div class="legend">
+          <div><span class="sw blue"></span><span><b style="color:var(--ink)">蓝色格</b> = 可填(你的预估),点进去输数字</span></div>
+          <div><span class="sw gray"></span><span><b style="color:var(--ink)">灰底「(实际)」</b> = 已关账月份,锁定真实数,不用填</span></div>
+          <div><span class="sw amber"></span><span><b style="color:var(--ink)">琥珀色行</b> = 按<b>数量</b>填写的产品(系统自动折算金额)</span></div>
+          <div><span class="sw green"></span><span><b style="color:var(--ink)">绿 / </b><span class="sw red" style="width:14px"></span> 红 = 完成率 Ach%(对比 AOP)</span></div>
+        </div>
+        <ol class="steps" style="margin-top:12px">
+          <li>金额单位一律<b>千元(K)</b>;数量口径的行直接填<b>数量</b>。</li>
+          <li>每行右侧可写<b>备注</b>(变化原因);页面顶部可写<b>总体说明</b>。</li>
+          <li>输入框里的<b>灰字</b>是上一版本的值,方便对比。</li>
+          <li>填完<b>自动保存</b>,右上角显示「✓ 已保存」。</li>
+        </ol>
+      </div>
+      <figure>
+        <!-- fill table mockup -->
+        <svg viewBox="0 0 300 232" role="img" aria-label="填写表示意">
+          <rect x="1" y="1" width="298" height="230" rx="12" fill="#fff" stroke="#C8CFDB"/>
+          <!-- header -->
+          <rect x="1" y="1" width="298" height="30" rx="12" fill="#EBEEF5"/>
+          <rect x="1" y="18" width="298" height="13" fill="#EBEEF5"/>
+          <text x="14" y="21" font-size="9.5" font-weight="700" fill="#354764" font-family="sans-serif">产品组</text>
+          <text x="120" y="21" font-size="9.5" font-weight="700" fill="#354764" text-anchor="middle" font-family="sans-serif">3月</text>
+          <text x="166" y="21" font-size="9.5" font-weight="700" fill="#354764" text-anchor="middle" font-family="sans-serif">4月</text>
+          <text x="212" y="21" font-size="9.5" font-weight="700" fill="#354764" text-anchor="middle" font-family="sans-serif">5月</text>
+          <text x="270" y="21" font-size="9.5" font-weight="700" fill="#354764" text-anchor="middle" font-family="sans-serif">Ach%</text>
+          <line x1="1" y1="31" x2="299" y2="31" stroke="#C8CFDB"/>
+          <!-- row 1: amount, with one closed (gray) -->
+          <text x="14" y="53" font-size="10" fill="#152235" font-family="sans-serif">导丝</text>
+          <rect x="98" y="40" width="44" height="22" rx="4" fill="#EBEEF5" stroke="#C8CFDB"/>
+          <text x="120" y="55" font-size="9.5" fill="#6E7E96" text-anchor="middle" font-family="sans-serif">实际</text>
+          <rect x="144" y="40" width="44" height="22" rx="4" fill="#EDF3FF" stroke="#B2CBF8"/>
+          <text x="166" y="55" font-size="10" fill="#152235" text-anchor="middle" font-family="sans-serif">130</text>
+          <rect x="190" y="40" width="44" height="22" rx="4" fill="#EDF3FF" stroke="#B2CBF8"/>
+          <text x="212" y="55" font-size="10" fill="#152235" text-anchor="middle" font-family="sans-serif">140</text>
+          <rect x="248" y="42" width="42" height="18" rx="9" fill="#E8F5EF"/>
+          <text x="269" y="55" font-size="9.5" font-weight="700" fill="#0D7F56" text-anchor="middle" font-family="sans-serif">103%</text>
+          <line x1="8" y1="70" x2="292" y2="70" stroke="#E1E5ED"/>
+          <!-- row 2: amount red -->
+          <text x="14" y="92" font-size="10" fill="#152235" font-family="sans-serif">网篮(量)</text>
+          <rect x="98" y="79" width="44" height="22" rx="4" fill="#FBF2E0" stroke="#E6CB8E"/>
+          <text x="120" y="94" font-size="10" fill="#9E6200" text-anchor="middle" font-family="sans-serif">10</text>
+          <rect x="144" y="79" width="44" height="22" rx="4" fill="#FBF2E0" stroke="#E6CB8E"/>
+          <text x="166" y="94" font-size="10" fill="#9E6200" text-anchor="middle" font-family="sans-serif">20</text>
+          <rect x="190" y="79" width="44" height="22" rx="4" fill="#FBF2E0" stroke="#E6CB8E"/>
+          <text x="212" y="94" font-size="10" fill="#9E6200" text-anchor="middle" font-family="sans-serif">18</text>
+          <rect x="248" y="81" width="42" height="18" rx="9" fill="#FAECEA"/>
+          <text x="269" y="94" font-size="9.5" font-weight="700" fill="#B8322B" text-anchor="middle" font-family="sans-serif">88%</text>
+          <line x1="8" y1="109" x2="292" y2="109" stroke="#E1E5ED"/>
+          <!-- row 3: empty editable -->
+          <text x="14" y="131" font-size="10" fill="#152235" font-family="sans-serif">封堵器</text>
+          <rect x="98" y="118" width="44" height="22" rx="4" fill="#EDF3FF" stroke="#B2CBF8"/>
+          <rect x="144" y="118" width="44" height="22" rx="4" fill="#EDF3FF" stroke="#B2CBF8"/>
+          <rect x="190" y="118" width="44" height="22" rx="4" fill="#EDF3FF" stroke="#B2CBF8"/>
+          <text x="269" y="133" font-size="9.5" fill="#6E7E96" text-anchor="middle" font-family="sans-serif">–</text>
+          <!-- remark band -->
+          <rect x="8" y="152" width="284" height="30" rx="7" fill="#F2F4F8" stroke="#E1E5ED"/>
+          <text x="18" y="165" font-size="9" font-weight="700" fill="#6E7E96" font-family="sans-serif">备注</text>
+          <text x="18" y="177" font-size="9.5" fill="#354764" font-family="sans-serif">Q2 招标落地,环比上调</text>
+          <!-- saved -->
+          <rect x="196" y="196" width="96" height="22" rx="11" fill="#E8F5EF"/>
+          <text x="244" y="211" font-size="10" font-weight="700" fill="#0D7F56" text-anchor="middle" font-family="sans-serif">✓ 已保存 14:32</text>
+        </svg>
+        <figcaption>蓝=可填 · 灰=已关账实际 · 琥珀=按数量填</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- 角色 -->
+  <h2><span class="ix">按角色</span>你具体要做什么</h2>
+
+  <!-- 代表 -->
+  <div class="card role">
+    <div class="role-head"><span class="dot b" style="width:20px;height:20px"></span><h3>代表(销售代表)</h3><span class="badge b">填自己的预估</span></div>
+    <p class="see"><b>能看到:</b>只有你自己的「省份 × 产品组」,与其他同事互不影响。</p>
+    <ol class="steps">
+      <li>登录:角色选<b>销售代表</b>,选自己姓名 + 本人登录密码。</li>
+      <li>在填写页逐月填预估(<b>蓝色格</b>),需要的填上<b>备注</b>。</li>
+      <li>缺产品或省份,可用 <span class="kbtn gh">＋ 新增产品/省份行</span> 自己补。</li>
+      <li>顶部切 <span class="kbtn gh">Q1 / H1 / FY</span> 等期间,核对完成率。</li>
+      <li>填完点 <span class="kbtn">⬇ 导出我的预估(Excel)</span>,把生成的 Excel <b>通过邮件发给管理员</b>汇总。</li>
+    </ol>
+  </div>
+
+  <!-- 经理 DSM -->
+  <div class="card role dsm">
+    <div class="role-head"><span class="dot g" style="width:20px;height:20px"></span><h3>经理(DSM)</h3><span class="badge g">看本团队</span></div>
+    <p class="see"><b>能看到:</b>你本团队的<b>所有代表</b>。</p>
+    <div class="split">
+      <div>
+        <ol class="steps">
+          <li>登录:角色选 <b>DSM</b>,选姓名 + 个人密码。</li>
+          <li>到<b>看板</b>按 代表 / 产品 / 省份 查看团队汇总,备注随行显示。</li>
+          <li>有空缺岗位没人填?在填写页可<b>代填空缺岗位</b>(岗位号)。</li>
+          <li>你改已有代表的数 → 存为<b>管理调整(橙色格)</b>,代表原始提交<b>不被覆盖</b>;清空该格即恢复代表原值。</li>
+          <li>离线汇报点 <span class="kbtn gh">⬇ 导出 Excel</span>(含汇总 / 全明细 / 备注)。</li>
+        </ol>
+      </div>
+      <figure>
+        <!-- mgr adjust mockup -->
+        <svg viewBox="0 0 300 150" role="img" aria-label="管理调整橙色格示意">
+          <rect x="1" y="1" width="298" height="148" rx="12" fill="#fff" stroke="#C8CFDB"/>
+          <text x="16" y="26" font-size="11" font-weight="700" fill="#354764" font-family="sans-serif">管理调整:橙色格</text>
+          <line x1="16" y1="34" x2="284" y2="34" stroke="#E1E5ED"/>
+          <!-- orange cell -->
+          <rect x="40" y="52" width="80" height="34" rx="6" fill="#FBF2E0" stroke="#9E6200"/>
+          <text x="80" y="74" font-size="14" font-weight="700" fill="#9E6200" text-anchor="middle" font-family="sans-serif">160</text>
+          <text x="80" y="100" font-size="9.5" fill="#6E7E96" text-anchor="middle" font-family="sans-serif">代表原值 130</text>
+          <!-- arrow + note -->
+          <path d="M140 69 h28" stroke="#9E6200" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+          <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#9E6200"/></marker></defs>
+          <text x="178" y="60" font-size="10.5" fill="#354764" font-family="sans-serif">经理上调的值</text>
+          <text x="178" y="77" font-size="10.5" fill="#354764" font-family="sans-serif">显示在格内,</text>
+          <text x="178" y="94" font-size="10.5" fill="#354764" font-family="sans-serif">代表原值列在下方</text>
+          <text x="178" y="111" font-size="9.5" fill="#6E7E96" font-family="sans-serif">清空 → 恢复代表原值</text>
+        </svg>
+        <figcaption>管理调整不覆盖代表的原始提交</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- 大区 RSM -->
+  <div class="card role rsm">
+    <div class="role-head"><span class="dot a" style="width:20px;height:20px"></span><h3>大区(RSM)</h3><span class="badge a">看全局</span></div>
+    <p class="see"><b>能看到:</b><b>全部</b>数据(或仅本大区,由管理员设定)。</p>
+    <div class="split">
+      <div>
+        <ol class="steps">
+          <li>登录:角色选 <b>RSM</b>,选姓名 + 个人密码。</li>
+          <li>到<b>看板</b>,按 <b>大区 / DSM / 产品 / 省份 / 代表</b> 任意维度看全局。</li>
+          <li>随时切换<b>金额 / 数量</b>、<b>期间</b>(Q1…FY、YTD),看完成率与同比。</li>
+          <li>同样可<b>代填空缺岗位</b>、做<b>管理调整</b>(橙色格,不覆盖原值)。</li>
+          <li>汇报点 <span class="kbtn gh">⬇ 导出 Excel</span>。</li>
+        </ol>
+      </div>
+      <figure>
+        <!-- dashboard mockup -->
+        <svg viewBox="0 0 300 150" role="img" aria-label="看板示意">
+          <rect x="1" y="1" width="298" height="148" rx="12" fill="#fff" stroke="#C8CFDB"/>
+          <!-- dim seg -->
+          <rect x="16" y="14" width="200" height="24" rx="7" fill="#fff" stroke="#C8CFDB"/>
+          <rect x="16" y="14" width="42" height="24" rx="7" fill="#152235"/>
+          <text x="37" y="30" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" font-family="sans-serif">产品</text>
+          <text x="80" y="30" font-size="10" fill="#354764" text-anchor="middle" font-family="sans-serif">省份</text>
+          <text x="122" y="30" font-size="10" fill="#354764" text-anchor="middle" font-family="sans-serif">代表</text>
+          <text x="164" y="30" font-size="10" fill="#354764" text-anchor="middle" font-family="sans-serif">DSM</text>
+          <text x="200" y="30" font-size="10" fill="#354764" text-anchor="middle" font-family="sans-serif">RSM</text>
+          <!-- bars -->
+          <rect x="40" y="92" width="22" height="42" rx="3" fill="#2054E0"/>
+          <rect x="74" y="74" width="22" height="60" rx="3" fill="#2054E0"/>
+          <rect x="108" y="104" width="22" height="30" rx="3" fill="#5B8DEF"/>
+          <rect x="142" y="84" width="22" height="50" rx="3" fill="#2054E0"/>
+          <line x1="32" y1="134" x2="180" y2="134" stroke="#C8CFDB"/>
+          <!-- summary pills -->
+          <rect x="196" y="58" width="90" height="22" rx="11" fill="#E8F5EF"/>
+          <text x="241" y="73" font-size="10" font-weight="700" fill="#0D7F56" text-anchor="middle" font-family="sans-serif">FY Ach 101%</text>
+          <rect x="196" y="86" width="90" height="22" rx="11" fill="#FAECEA"/>
+          <text x="241" y="101" font-size="10" font-weight="700" fill="#B8322B" text-anchor="middle" font-family="sans-serif">GR −3.2%</text>
+          <rect x="196" y="114" width="90" height="20" rx="10" fill="#EDF3FF"/>
+          <text x="241" y="128" font-size="9.5" font-weight="700" fill="#2054E0" text-anchor="middle" font-family="sans-serif">⬇ 导出 Excel</text>
+        </svg>
+        <figcaption>看板:任意维度切换,一键导出</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- 第三步 提交 -->
+  <h2><span class="ix">第 3 步</span>导出预估 Excel,邮件发给管理员</h2>
+  <div class="card">
+    <div class="flow">
+      <div class="fstep">代表填写<small>填好预估</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">导出 Excel<small>导出我的预估(Excel)</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">邮件发给管理员<small>作为附件发送</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">一次合并<small>导入代表预估 Excel(多选)</small></div>
+      <div class="farrow">→</div>
+      <div class="fstep">看板汇总<small>全员数据到位</small></div>
+    </div>
+    <div class="note">导出的 Excel 既能直接打开核对,也带有隐藏数据供管理员<b>无损合并</b>;请在工具里填写,<b>不要直接改 Excel 里的数字</b>,然后作为附件<b>邮件</b>发给管理员。</div>
+  </div>
+
+  <!-- 小贴士 -->
+  <h2><span class="ix">提示</span>常见问题</h2>
+  <div class="card">
+    <ul class="tips">
+      <li>切换身份或切换页面会<b>自动保存</b>,不用手动存。</li>
+      <li>看不到数据?先确认<b>管理员已发布/导入</b>,且你<b>选对了身份</b>。</li>
+      <li>忘记密码只能找管理员<b>重置</b>(密码加密保存,无法找回)。</li>
+      <li>数量口径(琥珀色)产品请填<b>数量</b>,系统自动折算金额,不要填金额。</li>
+      <li>换电脑 / 换浏览器数据不互通;以管理员发布的链接或数据包为准。</li>
+    </ul>
+  </div>
+
+  <footer>
+    <span>销售预估填写工具 · 使用手册</span>
+    <span>代表 / 经理(DSM) / 大区(RSM)</span>
+  </footer>
+
+</div>
+</body>
+</html>
+`;
+function openManual() {
+  let ov = document.getElementById("manual-overlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "manual-overlay";
+    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(21,34,53,.55);display:flex;flex-direction:column";
+    const bar = document.createElement("div");
+    bar.style.cssText = "flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#152235;color:#fff;padding:11px 18px;font-size:14px;font-weight:700";
+    bar.innerHTML = "<span>\u{1F4D6} \u4F7F\u7528\u624B\u518C</span>";
+    const btnClose = document.createElement("button");
+    btnClose.textContent = "\u5173\u95ED \u2715";
+    btnClose.style.cssText = "border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit";
+    btnClose.onclick = () => { ov.style.display = "none"; };
+    bar.appendChild(btnClose);
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "flex:1;width:100%;border:0;background:#F2F4F8";
+    frame.setAttribute("title", "\u4F7F\u7528\u624B\u518C");
+    ov.appendChild(bar); ov.appendChild(frame);
+    document.body.appendChild(ov);
+    frame.srcdoc = MANUAL_HTML;
+    ov.addEventListener("click", e => { if (e.target === ov) ov.style.display = "none"; });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && ov && ov.style.display !== "none") ov.style.display = "none"; });
+  }
+  ov.style.display = "flex";
+}
 /* =================== 系统数据导入流程 =================== */
 async function onXlsxFile(file) {
   if (typeof XLSX === "undefined") {
@@ -2307,20 +2746,160 @@ function exportRepFile() {
   downloadJSON("预估_" + rep.replace(/[\\/:*?"<>|]/g, "_") + "_" + stamp() + ".json", { kind: "fc-rep", exportedAt: Date.now(), doc });
   toast("已导出「" + rep + "」的预估文件,请发给管理员汇总");
 }
+/* 单个代表 doc 的合并(JSON 与 Excel 两条导入路径共用):按 updatedAt 去重,本机更新则跳过 */
+async function mergeRepDoc(doc) {
+  if (!doc || !doc.rep) return "bad";
+  if (!doc.rows) doc.rows = {};
+  if (!doc.updatedAt) doc.updatedAt = Date.now();
+  const old = S.fcs.get(doc.rep);
+  if (old && (old.updatedAt || 0) >= (doc.updatedAt || 0)) return "skip";
+  S.fcs.set(doc.rep, doc);
+  const ok = await Store.set("fc-f-" + doc.rep, doc);
+  return ok ? "ok" : "bad";
+}
 async function importRepFiles(files) {
   let ok = 0, skip = 0, bad = 0;
   for (const f of files) {
     try {
       const d = JSON.parse(await f.text());
       const doc = d && d.kind === "fc-rep" && d.doc;
-      if (!doc || !doc.rep) { bad++; continue; }
-      const old = S.fcs.get(doc.rep);
-      if (old && (old.updatedAt || 0) >= (doc.updatedAt || 0)) { skip++; continue; }
-      S.fcs.set(doc.rep, doc); await Store.set("fc-f-" + doc.rep, doc); ok++;
+      const r = await mergeRepDoc(doc);
+      if (r === "ok") ok++; else if (r === "skip") skip++; else bad++;
     } catch (e) { bad++; }
   }
   rerender();
   toast("合并完成: 更新 " + ok + " 人" + (skip ? " · 跳过 " + skip + "(本机更新)" : "") + (bad ? " · 失败 " + bad : ""));
+}
+
+/* =================== 代表预估 Excel 导出(可读 + 隐藏无损数据) =================== */
+function exportRepXlsx() {
+  const rep = S.curRep; if (!rep) { toast("请先选择代表"); return; }
+  if (typeof XLSX === "undefined") { toast("Excel 组件未加载(需联网加载一次后再导出)"); return; }
+  const doc = S.fcs.get(rep) || ensureDoc(rep);
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
+  const ents = buildEntries().filter(e => e.rep === rep)
+    .sort((a, b) => (a.prov || "").localeCompare(b.prov || "", "zh") || grpSortKey(a.grp).localeCompare(grpSortKey(b.grp)));
+  const head = ["代表", "省份", "产品组", "填写口径", ...MN, "行备注"];
+  const aoa = [
+    ["周期", (S.cfg && S.cfg.cycleLabel) || "", "代表", rep, "导出时间", new Date().toLocaleString("zh-CN")],
+    ["总体备注", doc.overall || ""],
+    ["⚠ 本表仅供查看核对。请在工具内填写;直接修改本表的数字不会被导入(导入以隐藏数据为准)。"],
+    [],
+    head
+  ];
+  for (const e of ents) {
+    const cell = (doc.rows && doc.rows[e.key]) || {};
+    const av = cell.a || [], qv = cell.q || [];
+    const line = [e.rep, e.prov, e.grp, e.qtyMode ? "数量" : "金额(千元)"];
+    for (let i = 0; i < 12; i++) {
+      if (actSet.has(i + 1)) { line.push("(实际)"); continue; }
+      const v = e.qtyMode ? qv[i] : av[i];
+      line.push(v == null ? "" : v);
+    }
+    line.push((cell.rm) || "");
+    aoa.push(line);
+  }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, ...Array(12).fill({ wch: 7 }), { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, ws, "我的预估");
+  /* 隐藏的无损数据:整段 doc JSON 分块写入,避免单元格 32767 字符上限 */
+  const payload = JSON.stringify({ kind: "fc-rep", exportedAt: Date.now(), doc });
+  const CH = 30000, chunks = [];
+  for (let i = 0; i < payload.length; i += CH) chunks.push(payload.slice(i, i + CH));
+  if (!chunks.length) chunks.push("");
+  const daoa = [["FC-REP-V1", chunks.length, rep], ...chunks.map(c => [c])];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daoa), "_FCDATA");
+  try { wb.Workbook = { Sheets: wb.SheetNames.map(n => ({ Hidden: n === "_FCDATA" ? 1 : 0 })) }; } catch (e) {}
+  XLSX.writeFile(wb, "预估_" + rep.replace(/[\\/:*?"<>|]/g, "_") + "_" + stamp() + ".xlsx");
+  toast("已导出「" + rep + "」的预估 Excel,请发给管理员汇总");
+}
+
+/* =================== 代表预估 Excel 导入(管理员多选合并) =================== */
+/* 1) 优先读隐藏 _FCDATA(无损);2) 没有则从可见表按 代表+省份+产品组 还原 */
+function readEmbeddedRepDoc(wb) {
+  const name = wb.SheetNames.find(n => /_FCDATA/i.test(n));
+  if (!name) return null;
+  const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "" });
+  if (!aoa.length || String(aoa[0][0] || "").trim() !== "FC-REP-V1") return null;
+  const n = parseInt(aoa[0][1]) || (aoa.length - 1);
+  let s = "";
+  for (let i = 1; i <= n && i < aoa.length; i++) s += (aoa[i][0] == null ? "" : String(aoa[i][0]));
+  try { const d = JSON.parse(s); return (d && d.doc) ? d.doc : (d && d.rep ? d : null); } catch (e) { return null; }
+}
+function reconstructRepDocsFromSheet(wb, file) {
+  const qtySet = new Set((S.cfg && S.cfg.qtyGroups) || []);
+  const norm = s => String(s == null ? "" : s).trim();
+  const monthIdxOf = h => {
+    const t = norm(h);
+    let m = t.match(/^(\d{1,2})\s*月?$/); if (m) { const k = +m[1]; if (k >= 1 && k <= 12) return k - 1; }
+    const mn = MN.indexOf(t); if (mn >= 0) return mn;
+    const en = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(t.slice(0, 3).toLowerCase());
+    if (en >= 0) return en;
+    return -1;
+  };
+  const docs = new Map();
+  for (const sn of wb.SheetNames) {
+    if (/_FCDATA/i.test(sn)) continue;
+    const ws = wb.Sheets[sn]; if (!ws || !ws["!ref"]) continue;
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    if (!aoa.length) continue;
+    // 找表头行:含 省份 与 产品组 两类列
+    let hr = -1, col = {};
+    for (let r = 0; r < Math.min(aoa.length, 8); r++) {
+      const row = aoa[r].map(norm), c = {};
+      row.forEach((h, i) => {
+        if (/^(代表|rep|销售代表)$/i.test(h)) c.rep = i;
+        else if (/^(省份|省|province)$/i.test(h)) c.prov = i;
+        else if (/(产品组|product\s*line|prod\s*group|^group$|^产品$|for\s*预估)/i.test(h)) c.grp = i;
+        else if (/(备注|说明|remark|note)/i.test(h)) c.rm = i;
+        else { const mi = monthIdxOf(h); if (mi >= 0) { c.m = c.m || {}; c.m[mi] = i; } }
+      });
+      if (c.prov != null && c.grp != null && c.m && Object.keys(c.m).length) { hr = r; col = c; break; }
+    }
+    if (hr < 0) continue;
+    // 兜底代表名:文件名 预估_姓名_时间.xlsx
+    let fileRep = "";
+    const fn = (file && file.name || "").replace(/\.(xlsx|xls)$/i, "");
+    let fm = fn.match(/^预估[_\s]+(.+?)[_\s]+\d{6,}/); if (fm) fileRep = fm[1];
+    for (let r = hr + 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      const prov = norm(row[col.prov]), grp = norm(row[col.grp]);
+      if (!prov || !grp) continue;
+      const rep = (col.rep != null ? norm(row[col.rep]) : "") || fileRep;
+      if (!rep) continue;
+      let doc = docs.get(rep);
+      if (!doc) { doc = { rep, updatedAt: (file && file.lastModified) || Date.now(), overall: "", rows: {} }; docs.set(rep, doc); }
+      const key = rowKey(rep, prov, grp);
+      const qm = qtySet.has(grp);
+      const cell = doc.rows[key] || { a: Array(12).fill(null), q: Array(12).fill(null), rm: "" };
+      for (const mi in col.m) {
+        const raw = norm(row[col.m[mi]]);
+        if (raw === "" || raw === "(实际)") continue;
+        const v = parseFloat(raw.replace(/,/g, "")); if (!isFinite(v)) continue;
+        if (qm) cell.q[+mi] = v; else cell.a[+mi] = v;
+      }
+      if (col.rm != null) { const rm = norm(row[col.rm]); if (rm) cell.rm = rm; }
+      doc.rows[key] = cell;
+    }
+  }
+  return [...docs.values()].filter(d => Object.keys(d.rows).length);
+}
+async function importRepXlsxFiles(files) {
+  if (typeof XLSX === "undefined") { toast("Excel 组件未加载(需联网加载一次)"); return; }
+  let ok = 0, skip = 0, bad = 0, recon = 0;
+  for (const f of files) {
+    try {
+      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: "array" });
+      let docs = []; const emb = readEmbeddedRepDoc(wb);
+      if (emb && emb.rep) docs = [emb];
+      else { docs = reconstructRepDocsFromSheet(wb, f); recon += docs.length; }
+      if (!docs.length) { bad++; continue; }
+      for (const doc of docs) { const r = await mergeRepDoc(doc); if (r === "ok") ok++; else if (r === "skip") skip++; else bad++; }
+    } catch (e) { console.error("importRepXlsxFiles:", e); bad++; }
+  }
+  rerender();
+  toast("Excel 合并完成: 更新 " + ok + " 人" + (skip ? " · 跳过 " + skip + "(本机更新)" : "") + (recon ? " · 兼容还原 " + recon : "") + (bad ? " · 失败 " + bad : ""));
 }
 async function exportPackage() {
   if (!S.master) { toast("没有可导出的数据"); return; }
@@ -2436,8 +3015,8 @@ function renderAdmin() {
   if (Store.shared) h += "<p>🟢 当前为<b>共享模式</b>:所有人打开同一个发布链接即实时共用一份数据。销售填完,你的看板立即可见,<b>无需任何文件传递</b>。</p>" +
     '<p style="color:var(--mute);font-size:12px;margin:8px 0">仍建议每次提报截止后导出一份数据包留档。</p><button class="btn sm" id="ad-exppkg">⬇ 导出数据包备份</button>';
   else h += "<p>💾 当前为<b>本地模式</b>(直接打开 HTML 文件):数据保存在本浏览器(localStorage),换电脑/换浏览器不互通。用文件接力:</p>" +
-    '<ol class="steps" style="margin:8px 0"><li><b>你</b>:导入系统数据 → <b>导出数据包</b>发给所有销售</li><li><b>销售</b>:打开同一个 HTML → 导入数据包 → 填写 → 在填写页<b>导出我的预估文件</b>发回</li><li><b>你</b>:导入自己的数据包 → <b>导入代表预估文件</b>(可一次多选)→ 看板汇总 / 导出 Excel</li></ol>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" id="ad-exppkg">⬇ 导出数据包</button><button class="btn sm" id="ad-imppkg">📥 导入数据包</button><button class="btn sm" id="ad-impreps">📥 导入代表预估文件(多选)</button></div>';
+    '<ol class="steps" style="margin:8px 0"><li><b>你</b>:导入系统数据 → <b>导出数据包</b>发给所有销售</li><li><b>销售</b>:打开同一个 HTML → 导入数据包 → 填写 → 在填写页<b>导出我的预估(Excel)</b>发回</li><li><b>你</b>:导入自己的数据包 → <b>导入代表预估 Excel</b>(可一次多选)→ 看板汇总 / 导出 Excel</li></ol>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" id="ad-exppkg">⬇ 导出数据包</button><button class="btn sm" id="ad-imppkg">📥 导入数据包</button><button class="btn pri sm" id="ad-imprepsx">📥 导入代表预估 Excel(多选)</button><button class="btn sm" id="ad-impreps">📥 导入代表预估 JSON(多选)</button></div>';
   h += "</div></div>";
   /* ⑥ 安全与权限 */
   h += '<div class="card"><div class="card-h"><b>⑥ 安全、权限与维护</b></div><div style="padding:14px 16px;font-size:13px" id="sec-card">' +
@@ -2487,6 +3066,7 @@ function renderAdmin() {
   if ($("#ad-exppkg")) $("#ad-exppkg").onclick = exportPackage;
   if ($("#ad-imppkg")) $("#ad-imppkg").onclick = () => $("#file-pkg").click();
   if ($("#ad-impreps")) $("#ad-impreps").onclick = () => $("#file-reps").click();
+  if ($("#ad-imprepsx")) $("#ad-imprepsx").onclick = () => $("#file-reps-xlsx").click();
   $("#pin-save").onclick = async () => {
     if (!S.cfg) { toast("请先导入数据再设置 PIN"); return; }
     const v = $("#pin-new").value.trim();
@@ -3003,6 +3583,7 @@ async function init() {
   if (S.me && S.me.role === "rep") S.curRep = S.me.name;
   $$(".tabs .tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
   $("#btn-me").onclick = () => renderGate();
+  $("#btn-help") && ($("#btn-help").onclick = () => openManual());
   $("#btn-chgpwd").onclick = () => openChangePasswordModal();
   $("#btn-cloud").onclick = async () => { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); };
   if (cloudMode()) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
@@ -3011,6 +3592,7 @@ async function init() {
   $("#file-xlsx").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onXlsxFile(f); });
   $("#file-pkg").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) importPackage(f); });
   $("#file-reps").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importRepFiles(fs); });
+  $("#file-reps-xlsx").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importRepXlsxFiles(fs); });
   window.addEventListener("beforeunload", () => { flushDirtyReps(false); });
   applyMe();
   rerender();
