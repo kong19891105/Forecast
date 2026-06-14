@@ -192,6 +192,14 @@ table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;w
 }
 .dt td.act-cell{color:var(--ink2);background:#F7F8F4}
 .dt td.dim{color:var(--mute)}
+/* 提报进度: 各经理(DSM)表格统一列宽 —— 固定布局 + 统一 colgroup, 与内容无关 */
+table.dt.prog-tbl{table-layout:fixed;min-width:560px}
+.dt.prog-tbl col.c-rep{width:200px}
+.dt.prog-tbl col.c-st{width:104px}
+.dt.prog-tbl col.c-pct{width:92px}
+.dt.prog-tbl col.c-fill{width:112px}
+.dt.prog-tbl col.c-upd{width:auto}
+.dt.prog-tbl th,.dt.prog-tbl td{overflow:hidden;text-overflow:ellipsis}
 td.pos,.pos{color:var(--green);font-weight:600}
 td.neg,.neg{color:var(--red);font-weight:600}
 td.warn,.warn{color:var(--amber);font-weight:600}
@@ -260,6 +268,34 @@ td.warn,.warn{color:var(--amber);font-weight:600}
   background:var(--blue-soft);color:var(--blue);font-weight:600;justify-content:center;
 }
 .ms-panel .ms-done:hover{background:var(--blue-line);color:#fff}
+/* 选中项高亮(现代浏览器 :has) */
+.ms-panel label:has(input:checked){background:var(--blue-soft);color:var(--blue);font-weight:600}
+
+/* ---------- 看板: 下钻筛选条 ---------- */
+.drillbar{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  padding:9px 16px 11px;border-top:1px solid var(--line);
+  background:linear-gradient(180deg,#FBFCFE,#F5F8FC);
+}
+.drillbar-lab{
+  font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--mute);
+  text-transform:uppercase;margin-right:2px;white-space:nowrap;
+}
+.drillbar-sp{flex:1 1 12px}
+.drillbar-count{font-size:11.5px;color:var(--blue);font-weight:600;white-space:nowrap}
+.drillbar .ms-trigger{min-width:124px}
+.ms-trigger-txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms-cur{
+  font-size:9.5px;font-weight:700;color:#fff;background:var(--blue);
+  border-radius:4px;padding:1px 5px;letter-spacing:.02em;flex:none;
+}
+/* 当前维度 = 主下钻 */
+.ms-wrap.primary .ms-trigger{border-color:var(--blue-line);background:var(--blue-soft)}
+.ms-wrap.primary .ms-trigger:hover{border-color:var(--blue)}
+/* 已选中态 */
+.ms-wrap.active .ms-trigger{border-color:var(--blue);color:var(--blue);font-weight:600;box-shadow:0 0 0 2px rgba(32,84,224,.10)}
+.ms-wrap.primary.active .ms-trigger{background:var(--blue-soft)}
+
 
 /* ---------- resizable / reorderable / sortable table ---------- */
 .dt th,.dt td{border-right:1px solid var(--line)}
@@ -477,6 +513,124 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
 
+/* ============================================================
+   移动端: 逐行卡片式填写视图 + 响应式外壳
+   ============================================================ */
+/* —— 卡片式填写(仅手机渲染该结构) —— */
+.m-fill{padding:8px 10px 4px;position:relative}
+.m-grp{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin:10px 0 6px;padding:7px 10px;border-radius:8px;
+  background:#F2F4F8;border:1px solid var(--line);
+  font-weight:700;font-size:13px;color:var(--ink);
+}
+.m-grp-name{margin-right:2px}
+.m-grp-sub{margin-left:auto;font-size:11.5px;font-weight:500;color:var(--mute)}
+.m-grp-sub b{font-weight:700;color:var(--ink2)}
+.m-row{
+  border:1px solid var(--line);border-radius:12px;background:#fff;
+  box-shadow:var(--shadow-sm);padding:12px 13px;margin-bottom:12px;
+}
+.m-row-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.m-row-name{font-weight:700;font-size:14px;color:var(--ink)}
+.m-kpi{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:6px;
+  padding:8px;border-radius:8px;background:linear-gradient(180deg,#FAFBFD,#F4F7FB);
+  border:1px solid var(--line);margin-bottom:10px;
+}
+.m-kpi div{display:flex;flex-direction:column;gap:1px;min-width:0}
+.m-kpi small{font-size:9.5px;color:var(--mute);font-weight:600}
+.m-kpi b{font-family:var(--num);font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-act{margin-bottom:6px}
+.m-act-lab{font-size:10.5px;color:var(--mute);font-weight:600;letter-spacing:.02em}
+.m-act-strip{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.m-act-chip{
+  font-size:11px;font-family:var(--num);color:var(--ink2);
+  background:#F2F4F0;border:1px solid var(--line);border-radius:6px;padding:2px 7px;
+}
+.m-act-chip i{font-style:normal;color:var(--mute);margin-right:4px}
+.m-months{margin-top:2px}
+.m-mo{
+  display:grid;grid-template-columns:1fr auto;align-items:center;
+  gap:8px 10px;padding:8px 0;border-top:1px dashed var(--line);
+}
+.m-mo:first-child{border-top:none}
+.m-mo-lab{font-size:13px;color:var(--ink2);font-weight:600;white-space:nowrap}
+.m-mo-lab i.fc{
+  font-style:normal;font-size:10px;font-weight:600;color:var(--blue);
+  background:var(--blue-soft);border-radius:4px;padding:1px 5px;margin-left:6px;
+}
+.m-mo-field{display:flex;align-items:center;gap:6px;justify-self:end}
+.m-fill .fc-in{width:128px;height:40px;font-size:16px;text-align:right;border-radius:8px}
+.m-mo-unit{color:var(--mute);font-size:12.5px;min-width:14px}
+.m-mo-amt,.m-mo-rv{grid-column:1 / -1;justify-self:end;text-align:right;margin-top:-3px}
+.m-mo-rv:empty,.m-mo-amt:empty{display:none}
+.m-rm{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.m-rm label{font-size:11px;color:var(--mute);font-weight:600}
+.m-fill .rm-in{width:100%;font-size:16px;padding:9px 10px;border-radius:8px}
+.m-total{
+  position:sticky;bottom:0;z-index:4;margin-top:6px;
+  background:#E8ECF3;border-top:2px solid var(--line2);
+  border-radius:10px;padding:10px 12px;
+  box-shadow:0 -4px 14px rgba(21,34,53,.07);
+}
+.m-total:empty{display:none}
+.m-total-lab{font-weight:700;font-size:12px;color:var(--ink2);display:block;margin-bottom:5px}
+.m-total-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.m-total-grid span{display:flex;flex-direction:column;min-width:0}
+.m-total-grid small{font-size:9.5px;color:var(--mute);font-weight:600}
+.m-total-grid b{font-family:var(--num);font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* —— 窄屏外壳调整 —— */
+@media(max-width:720px){
+  html{font-size:13.5px}
+  .appbar{height:auto;min-height:50px;padding:6px 12px;gap:8px 12px;flex-wrap:wrap}
+  .logo b{font-size:15px}
+  .logo span{display:none}
+  .tabs{order:3;width:100%;overflow-x:auto;height:42px;gap:0;-webkit-overflow-scrolling:touch}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:0 12px;font-size:13px;white-space:nowrap;flex:1 0 auto}
+  .bar-right{gap:6px;flex-wrap:wrap}
+  .icon-btn{padding:6px 9px;font-size:11px}
+  .ctxbar{position:static;top:auto;padding:8px 12px;gap:8px 14px}
+  .ctx-cycle{font-size:12px;white-space:normal}
+  .ctx-legend{display:none}
+  .ctx-kpis{margin-left:0;width:100%;gap:14px}
+  .ctx-kpi{flex:1;align-items:stretch}
+  .gauge{width:100%}
+  main{padding:12px 10px 90px}
+  .card{border-radius:10px;margin-bottom:12px}
+  .card:hover{box-shadow:var(--shadow-sm)}
+  .card-h{padding:12px;gap:8px}
+  .card-h h3{font-size:13.5px;width:100%}
+  .card-h .hint{font-size:11.5px}
+  .card-b{padding:12px}
+  .statgrid{grid-template-columns:repeat(2,1fr);gap:8px;padding:12px}
+  .stat{padding:10px 11px}
+  .stat b{font-size:17px}
+  .stat small{font-size:10.5px}
+  .seg{flex-wrap:wrap}
+  .seg button{padding:7px 11px;font-size:12.5px}
+  .fc-toolbar{padding:10px 12px;gap:7px}
+  .fc-toolbar .hint{width:100%}
+  .fc-toolbar .btn.sm{flex:1 1 auto;text-align:center}
+  .bi-banner{flex-direction:column;align-items:flex-start;gap:8px}
+  .drillbar{padding:9px 12px}
+  .drillbar .ms-wrap{flex:1 1 130px}
+  .drillbar .ms-trigger{min-width:0;width:100%}
+  .drillbar-sp{display:none}
+  .acc-strip{gap:14px}
+  .acc-title{min-width:0}
+  /* 看板/进度等宽表在手机上横向滚动, 不撑破布局 */
+  .twrap{max-height:none}
+  .modal{border-radius:14px}
+}
+/* 极窄屏(小手机): 月度输入与 KPI 再紧凑一点 */
+@media(max-width:380px){
+  .m-fill .fc-in{width:108px}
+  .m-kpi b,.m-total-grid b{font-size:12.5px}
+}
+
 /* print */
 @media print{.appbar,.ctxbar,.card-h .btn,.fc-toolbar{display:none}}
 </style>
@@ -549,6 +703,11 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const num = v => { if (v === null || v === undefined || v === "") return 0; const n = typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : 0; };
 const zeros = () => Array(12).fill(0);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+/* ---- 移动端检测: 窄屏(手机)启用逐行卡片式填写视图 ---- */
+const MOBILE_BP = 720;
+const mqMobile = window.matchMedia("(max-width:" + MOBILE_BP + "px)");
+function isMobile() { return mqMobile.matches; }
 
 /* ---- 数字显示: 金额一律千元(K) ---- */
 function fmtK(v, d) { if (v === null || v === undefined || !isFinite(v)) return "–";
@@ -1156,10 +1315,8 @@ function renderCtx() {
   const ytdAch = pe.ytdAop > 0 ? pe.ytdAct / pe.ytdAop : null;
   const oT = pe.openTotal, oF = pe.openFilled;
   const pLabel = periodLabel(S.period);
+  /* 顶部口径条只保留「填写进度」; YTD达成 / 预估达成 / GR% 已在下方 KPI 卡片展示，避免重复 */
   kp.innerHTML =
-    '<div class="ctx-kpi"><small>YTD达成</small><b class="num">' + fmtPct(ytdAch) + "</b></div>" +
-    '<div class="ctx-kpi"><small>' + pLabel + '预估达成</small><b class="num">' + achSymHtml(ach) + fmtPct(ach) + "</b></div>" +
-    '<div class="ctx-kpi"><small>' + pLabel + ' GR% vs FY' + S.cfg.ly + "</small><b class=\"num\">" + fmtPct(gr) + "</b></div>" +
     '<div class="ctx-kpi"><small>填写进度 ' + Math.round(oT ? oF / oT * 100 : 0) + '%</small><div class="gauge"><i style="width:' + Math.min(100, oT ? oF / oT * 100 : 0) + '%"></i></div></div>';
 }
 
@@ -1322,17 +1479,13 @@ async function renderFill() {
     esc(S.curRep) + " 的预估明细";
   const pLabel = periodLabel(S.period);
   const pShort = periodShort(S.period);
-  html += '<div class="card"><div class="card-h"><h3>' + tableTitle + '</h3>' +
+  const mob = isMobile();
+  html += '<div class="card' + (mob ? ' m-fill-card' : '') + '"><div class="card-h"><h3>' + tableTitle + '</h3>' +
     '<div class="seg" id="period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (S.period === p.key || (p.key === "YTD" && S.period.startsWith("YTD")) ? "on" : "") + '">' + p.label + '</button>').join('') + '</div>' +
     '<select class="ctrl" id="fill-ytd" style="width:80px;margin-left:4px;' + (S.period.startsWith("YTD") ? "" : "display:none") + '">' + MN.map((m, i) => '<option value="' + (i + 1) + '"' + (S.period === "YTD-" + (i + 1) ? " selected" : "") + '>' + m + '</option>').join('') + '</select>' +
-    '<span class="hint">蓝色格可编辑(其余为系统数据,不可改) · 金额单位:千元 K · 灰底为已关账实际 · 输入框灰字为上次版本值' + (mvFill ? ' · <b style="color:var(--amber)">橙色格=管理调整</b>(格下方显示代表原值,清空该格即恢复代表原值)' : '') + '</span></div>' +
-    '<div class="twrap"><table class="dt"><thead><tr>' +
-    '<th class="l stick1" data-cid="name" style="min-width:200px">' + col1Label + '</th>';
-  for (let i = 0; i < 12; i++) html += '<th data-cid="m' + i + '">' + MN[i] + (actSet.has(i + 1) ? "<br><span style='font-weight:400'>Act</span>" : "<br><span style='color:var(--blue)'>预估</span>") + "</th>";
-  html += '<th class="l" data-cid="rm" style="min-width:240px">备注(预估说明/变化原因)</th>' +
-    '<th data-cid="fy">' + pShort + '预估</th><th data-cid="aop">' + pShort + ' AOP</th><th data-cid="ach">' + pShort + ' Ach%</th><th data-cid="gr">' + pShort + ' GR%</th>' +
-    (ver ? '<th data-cid="vfy" title="最近版本快照中的同期间预估">上版' + pShort + '预估</th><th data-cid="dfy" title="本次预估 − 上版预估">Δ上版</th><th data-cid="dfyPct" title="(本次预估 − 上版预估) ÷ 上版预估">Δ上版%</th>' : '') +
-    '</tr></thead><tbody id="fill-body">';
+    '<span class="hint">' + (mob
+      ? '逐行卡片填写 · 只需填蓝色「预估」月 · 金额单位:千元 K' + (mvFill ? ' · <b style="color:var(--amber)">橙色=管理调整</b>' : '')
+      : '蓝色格可编辑(其余为系统数据,不可改) · 金额单位:千元 K · 灰底为已关账实际 · 输入框灰字为上次版本值' + (mvFill ? ' · <b style="color:var(--amber)">橙色格=管理调整</b>(格下方显示代表原值,清空该格即恢复代表原值)' : '')) + '</span></div>';
 
   let ri = 0;
   const sortedKeys = [...byKey.keys()].sort((a, b) => {
@@ -1340,47 +1493,122 @@ async function renderFill() {
     if (S.fillMode === "grp") return a.localeCompare(b, "zh");
     return grpSortKey(a).localeCompare(grpSortKey(b));
   });
-  for (const key of sortedKeys) {
-    const list = byKey.get(key);
-    const qm = list[0].qtyMode;
-    const gsubId = 'gsub-' + esc(key).replace(/[^\w\u4e00-\u9fa5]/g, "_");
-    html += '<tr class="grp-row"><td class="l stick1">' + esc(key) + (qm ? '<span class="tag q">填数量</span>' : '<span class="tag">填金额K</span>') + '</td>' +
-      '<td colspan="' + (12 + (ver ? 7 : 4) + 1) + '" class="l" id="' + gsubId + '"></td></tr>';
-    for (const e of list) {
-      e._ri = ri;
-      const vrow = verRowOf(ver, e.key);
-      const pe = calcEntryPeriod(e, S.period);
-      html += '<tr data-key="' + esc(e.key) + '"><td class="l stick1" style="padding-left:20px">' + esc(e[subKey]) + (e.manual ? '<span class="tag new">新增</span>' : "") + (e.ovCount ? '<span class="tag ovr" title="管理层调整了 ' + e.ovCount + ' 个月">调整' + e.ovCount + '</span>' : "") + "</td>";
-      for (let i = 0; i < 12; i++) {
-        const c = e.m[i];
-        if (c.act) html += '<td class="act-cell num">' + fmtK(c.a) + (e.qtyMode ? '<span class="subv">' + fmtQ(c.q) + "件</span>" : "") + "</td>";
-        else {
-          const prevA = vrow && vrow.m ? vrow.m[i] : null;
-          if (e.qtyMode) {
-            const val = c.rawq != null ? String(+c.rawq.toFixed(2)) : (c.raw != null && e.asp > 0 ? String(+(c.raw / e.asp).toFixed(2)) : "");
-            const ph = prevA != null && e.asp > 0 ? "上版" + (+(prevA / e.asp).toFixed(1)) : "数量";
-            html += '<td><input class="fc-in' + (val ? " filled" : "") + (c.ov ? " ovr" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="q" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
-              '<span class="subv" id="amt-' + ri + "-" + i + '">' + (c.raw != null ? "≈" + fmtK(c.a) + "K" : "") + "</span>" +
-              '<span class="subv ovr-sub" id="rv-' + ri + "-" + i + '">' + (c.ov ? "代表 " + (c.rq != null ? fmtQ(c.rq) : (c.ra != null ? "≈" + fmtK(c.ra) + "K" : "未填")) : "") + "</span></td>";
-          } else {
-            const val = c.raw != null ? String(+(c.raw / 1000).toFixed(2)) : "";
-            const ph = prevA != null ? "上版" + fmtK(prevA) : "K";
-            html += '<td><input class="fc-in' + (val ? " filled" : "") + (c.ov ? " ovr" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="a" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
-              '<span class="subv ovr-sub" id="rv-' + ri + "-" + i + '">' + (c.ov ? "代表 " + (c.ra != null ? fmtK(c.ra) : "未填") : "") + "</span></td>";
+
+  if (!mob) {
+    /* ===== 桌面: 宽表格 ===== */
+    html += '<div class="twrap"><table class="dt"><thead><tr>' +
+      '<th class="l stick1" data-cid="name" style="min-width:200px">' + col1Label + '</th>';
+    for (let i = 0; i < 12; i++) html += '<th data-cid="m' + i + '">' + MN[i] + (actSet.has(i + 1) ? "<br><span style='font-weight:400'>Act</span>" : "<br><span style='color:var(--blue)'>预估</span>") + "</th>";
+    html += '<th class="l" data-cid="rm" style="min-width:240px">备注(预估说明/变化原因)</th>' +
+      '<th data-cid="fy">' + pShort + '预估</th><th data-cid="aop">' + pShort + ' AOP</th><th data-cid="ach">' + pShort + ' Ach%</th><th data-cid="gr">' + pShort + ' GR%</th>' +
+      (ver ? '<th data-cid="vfy" title="最近版本快照中的同期间预估">上版' + pShort + '预估</th><th data-cid="dfy" title="本次预估 − 上版预估">Δ上版</th><th data-cid="dfyPct" title="(本次预估 − 上版预估) ÷ 上版预估">Δ上版%</th>' : '') +
+      '</tr></thead><tbody id="fill-body">';
+    for (const key of sortedKeys) {
+      const list = byKey.get(key);
+      const qm = list[0].qtyMode;
+      const gsubId = 'gsub-' + esc(key).replace(/[^\w\u4e00-\u9fa5]/g, "_");
+      html += '<tr class="grp-row"><td class="l stick1">' + esc(key) + (qm ? '<span class="tag q">填数量</span>' : '<span class="tag">填金额K</span>') + '</td>' +
+        '<td colspan="' + (12 + (ver ? 7 : 4) + 1) + '" class="l" id="' + gsubId + '"></td></tr>';
+      for (const e of list) {
+        e._ri = ri;
+        const vrow = verRowOf(ver, e.key);
+        html += '<tr data-key="' + esc(e.key) + '"><td class="l stick1" style="padding-left:20px">' + esc(e[subKey]) + (e.manual ? '<span class="tag new">新增</span>' : "") + (e.ovCount ? '<span class="tag ovr" title="管理层调整了 ' + e.ovCount + ' 个月">调整' + e.ovCount + '</span>' : "") + "</td>";
+        for (let i = 0; i < 12; i++) {
+          const c = e.m[i];
+          if (c.act) html += '<td class="act-cell num">' + fmtK(c.a) + (e.qtyMode ? '<span class="subv">' + fmtQ(c.q) + "件</span>" : "") + "</td>";
+          else {
+            const prevA = vrow && vrow.m ? vrow.m[i] : null;
+            if (e.qtyMode) {
+              const val = c.rawq != null ? String(+c.rawq.toFixed(2)) : (c.raw != null && e.asp > 0 ? String(+(c.raw / e.asp).toFixed(2)) : "");
+              const ph = prevA != null && e.asp > 0 ? "上版" + (+(prevA / e.asp).toFixed(1)) : "数量";
+              html += '<td><input class="fc-in' + (val ? " filled" : "") + (c.ov ? " ovr" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="q" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
+                '<span class="subv" id="amt-' + ri + "-" + i + '">' + (c.raw != null ? "≈" + fmtK(c.a) + "K" : "") + "</span>" +
+                '<span class="subv ovr-sub" id="rv-' + ri + "-" + i + '">' + (c.ov ? "代表 " + (c.rq != null ? fmtQ(c.rq) : (c.ra != null ? "≈" + fmtK(c.ra) + "K" : "未填")) : "") + "</span></td>";
+            } else {
+              const val = c.raw != null ? String(+(c.raw / 1000).toFixed(2)) : "";
+              const ph = prevA != null ? "上版" + fmtK(prevA) : "K";
+              html += '<td><input class="fc-in' + (val ? " filled" : "") + (c.ov ? " ovr" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="a" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
+                '<span class="subv ovr-sub" id="rv-' + ri + "-" + i + '">' + (c.ov ? "代表 " + (c.ra != null ? fmtK(c.ra) : "未填") : "") + "</span></td>";
+            }
           }
         }
+        /* 备注 → 12月后、FY预估前 */
+        html += '<td class="l"><input class="rm-in" data-ri="' + ri + '" data-kind="rm" value="' + esc(e.rm) + '" placeholder="例: 6月手术量恢复,上调"></td>';
+        /* 期间动态列 */
+        html += '<td class="num" id="fy-' + ri + '"></td><td class="num" id="aop-' + ri + '"></td><td class="num" id="ach-' + ri + '"></td>' +
+          '<td class="num" id="gr-' + ri + '"></td>';
+        if (ver) html += '<td class="num" id="vfy-' + ri + '"></td><td class="num" id="dfy-' + ri + '"></td><td class="num" id="dfyPct-' + ri + '"></td>';
+        html += '</tr>';
+        ri++;
       }
-      /* 备注 → 12月后、FY预估前 */
-      html += '<td class="l"><input class="rm-in" data-ri="' + ri + '" data-kind="rm" value="' + esc(e.rm) + '" placeholder="例: 6月手术量恢复,上调"></td>';
-      /* 期间动态列 */
-      html += '<td class="num" id="fy-' + ri + '"></td><td class="num" id="aop-' + ri + '"></td><td class="num" id="ach-' + ri + '"></td>' +
-        '<td class="num" id="gr-' + ri + '"></td>';
-      if (ver) html += '<td class="num" id="vfy-' + ri + '"></td><td class="num" id="dfy-' + ri + '"></td><td class="num" id="dfyPct-' + ri + '"></td>';
-      html += '</tr>';
-      ri++;
     }
+    html += '</tbody><tfoot><tr class="total-row" id="fill-total"></tr></tfoot></table></div></div>';
+  } else {
+    /* ===== 手机: 逐行卡片式填写视图 ===== */
+    html += '<div class="m-fill" id="fill-body">';
+    for (const key of sortedKeys) {
+      const list = byKey.get(key);
+      const qm = list[0].qtyMode;
+      const safe = esc(key).replace(/[^\w\u4e00-\u9fa5]/g, "_");
+      html += '<div class="m-grp"><span class="m-grp-name">' + esc(key) + '</span>' +
+        (qm ? '<span class="tag q">填数量</span>' : '<span class="tag">填金额K</span>') +
+        '<span class="m-grp-sub" id="msub-' + safe + '"></span></div>';
+      for (const e of list) {
+        e._ri = ri;
+        const vrow = verRowOf(ver, e.key);
+        const unit = e.qtyMode ? '件' : 'K';
+        /* 卡头: 名称 + 期间 KPI(实时) */
+        html += '<div class="m-row" data-key="' + esc(e.key) + '">' +
+          '<div class="m-row-h"><span class="m-row-name">' + esc(e[subKey]) +
+            (e.manual ? '<span class="tag new">新增</span>' : "") +
+            (e.ovCount ? '<span class="tag ovr">调整' + e.ovCount + '</span>' : "") + '</span></div>' +
+          '<div class="m-kpi">' +
+            '<div><small>' + pShort + '预估</small><b class="num" id="fy-' + ri + '">–</b></div>' +
+            '<div><small>AOP</small><b class="num" id="aop-' + ri + '">–</b></div>' +
+            '<div><small>Ach%</small><b class="num" id="ach-' + ri + '">–</b></div>' +
+            '<div><small>GR%</small><b class="num" id="gr-' + ri + '">–</b></div>' +
+          '</div>';
+        /* 已关账月: 紧凑只读条 */
+        let actChips = "";
+        for (let i = 0; i < 12; i++) { const c = e.m[i]; if (c.act) actChips += '<span class="m-act-chip"><i>' + MN[i] + '</i>' + fmtK(c.a) + (e.qtyMode ? ' / ' + fmtQ(c.q) + '件' : 'K') + '</span>'; }
+        if (actChips) html += '<div class="m-act"><span class="m-act-lab">已关账(Act)</span><div class="m-act-strip">' + actChips + '</div></div>';
+        /* 预估月: 逐行输入 */
+        html += '<div class="m-months">';
+        for (let i = 0; i < 12; i++) {
+          const c = e.m[i];
+          if (c.act) continue;
+          const prevA = vrow && vrow.m ? vrow.m[i] : null;
+          let val, ph, kind;
+          if (e.qtyMode) {
+            val = c.rawq != null ? String(+c.rawq.toFixed(2)) : (c.raw != null && e.asp > 0 ? String(+(c.raw / e.asp).toFixed(2)) : "");
+            ph = prevA != null && e.asp > 0 ? "上版" + (+(prevA / e.asp).toFixed(1)) : "数量";
+            kind = "q";
+          } else {
+            val = c.raw != null ? String(+(c.raw / 1000).toFixed(2)) : "";
+            ph = prevA != null ? "上版" + fmtK(prevA) : "金额K";
+            kind = "a";
+          }
+          html += '<div class="m-mo">' +
+            '<span class="m-mo-lab">' + MN[i] + '<i class="fc">预估</i></span>' +
+            '<span class="m-mo-field">' +
+              '<input class="fc-in' + (val ? " filled" : "") + (c.ov ? " ovr" : "") + '" data-ri="' + ri + '" data-m="' + i + '" data-kind="' + kind + '" value="' + val + '" placeholder="' + ph + '" inputmode="decimal">' +
+              '<span class="m-mo-unit">' + unit + '</span>' +
+            '</span>' +
+            (e.qtyMode ? '<span class="subv m-mo-amt" id="amt-' + ri + "-" + i + '">' + (c.raw != null ? "≈" + fmtK(c.a) + "K" : "") + "</span>" : "") +
+            '<span class="subv ovr-sub m-mo-rv" id="rv-' + ri + "-" + i + '">' + (c.ov ? "代表 " + (e.qtyMode ? (c.rq != null ? fmtQ(c.rq) : (c.ra != null ? "≈" + fmtK(c.ra) + "K" : "未填")) : (c.ra != null ? fmtK(c.ra) : "未填")) : "") + "</span>" +
+            '</div>';
+        }
+        html += '</div>';
+        /* 备注 */
+        html += '<div class="m-rm"><label>备注 / 变化原因</label>' +
+          '<input class="rm-in" data-ri="' + ri + '" data-kind="rm" value="' + esc(e.rm) + '" placeholder="例: 6月手术量恢复,上调"></div>';
+        html += '</div>'; /* /m-row */
+        ri++;
+      }
+    }
+    html += '<div class="m-total" id="m-fill-total"></div>';
+    html += '</div></div>';
   }
-  html += '</tbody><tfoot><tr class="total-row" id="fill-total"></tr></tfoot></table></div></div>';
 
   /* —— 整体备注 —— */
   if (S.fillMode === "rep" || !S.fillMode) {
@@ -1607,8 +1835,11 @@ function paintGroupSubs(entries, ver) {
     by.get(k).push(e); 
   }
   for (const [grp, list] of by) {
-    const elId = 'gsub-' + esc(grp).replace(/[^\w\u4e00-\u9fa5]/g, "_");
-    const el = $("#" + elId); if (!el) continue;
+    const safe = esc(grp).replace(/[^\w\u4e00-\u9fa5]/g, "_");
+    const elId = 'gsub-' + safe;
+    const el = $("#" + elId);
+    const mEl = $("#msub-" + safe);
+    if (!el && !mEl) continue;
     const ps = calcEntriesPeriod(list, p);
     const fy = ps.fy, aop = ps.aop, ly = ps.ly;
     const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
@@ -1620,6 +1851,10 @@ function paintGroupSubs(entries, ver) {
     let vtxt = "";
     if (ver) { let vfy = 0, has = false; for (const e of list) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) { vfy += s; has = true; } }
       if (has) { const d = fy - vfy; vtxt = ' · vs上版 <span class="num ' + clsSign(d) + '">' + fmtDK(d) + "</span>"; } }
+
+    /* 手机: 紧凑小计 */
+    if (mEl) mEl.innerHTML = '小计 <b class="num">' + fmtK(fy) + 'K</b> · Ach <span class="num ' + clsAch(ach) + '">' + fmtPct(ach) + '</span> · GR <span class="num ' + clsSign(gr) + '">' + fmtPct(gr) + '</span>';
+    if (!el) continue;
     
     /* 小计行改成跟总计行一样的格式 */
     let h = '<td class="l stick1"><b>' + esc(grp) + '</b> 小计' + vtxt + '</td>';
@@ -1632,15 +1867,25 @@ function paintGroupSubs(entries, ver) {
     el.parentElement.innerHTML = h;
   }
   /* 底部合计行 */
-  const tr = $("#fill-total"); if (!tr) return;
+  const tr = $("#fill-total");
+  const mtr = $("#m-fill-total");
+  if (!tr && !mtr) return;
   const ps = calcEntriesPeriod(entries, p);
   const fy = ps.fy, aop = ps.aop, ly = ps.ly;
   const mm = zeros(); for (const e of entries) for (let i = 0; i < 12; i++) mm[i] += e.m[i].a;
+  const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
+  if (mtr) mtr.innerHTML = '<span class="m-total-lab">' + pShort + ' 合计</span>' +
+    '<span class="m-total-grid">' +
+      '<span><small>预估</small><b class="num">' + fmtK(fy) + 'K</b></span>' +
+      '<span><small>AOP</small><b class="num">' + fmtK(aop) + 'K</b></span>' +
+      '<span><small>Ach%</small><b class="num ' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + '</b></span>' +
+      '<span><small>GR%</small><b class="num ' + clsSign(gr) + '">' + fmtPct(gr) + '</b></span>' +
+    '</span>';
+  if (!tr) return;
   let h = '<td class="l stick1">合计 (千元)</td>';
   for (let i = 0; i < 12; i++) h += '<td class="num">' + fmtK(mm[i]) + "</td>";
   /* 备注 → 空td */
   h += '<td></td>';
-  const ach = aop > 0 ? fy / aop : null, gr = ly > 0 ? fy / ly - 1 : null;
   h += '<td class="num">' + fmtK(fy) + '</td><td class="num">' + fmtK(aop) + '</td><td class="num ' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</td>" +
     '<td class="num ' + clsSign(gr) + '">' + fmtPct(gr) + "</td>";
   if (ver) { let vfy = 0; for (const e of entries) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) vfy += s; }
@@ -1661,13 +1906,16 @@ function paintRepStats(entries, ver) {
   if (ver) for (const e of entries) { const s = verPeriodFy(verRowOf(ver, e.key), e.key, ms); if (s !== null) { vfy += s; has = true; } }
   const d = has ? fy - vfy : null;
   const pLbl = periodLabel(p);
+  /* GR% 比较基准随时间区间联动: 选 Q2 → 对比「Q2·FY去年」, 选 FY → 对比「FY去年」 */
+  const pShortL = periodShort(p);
+  const grCmpBase = (p === "FY") ? ("FY" + S.cfg.ly) : (pShortL + "·FY" + S.cfg.ly);
   const acc = ver ? calcVerAccuracy(entries, ver, ms) : null;
   el.innerHTML =
     stat("YTD 实际达成", fmtPct(ytdP > 0 ? ytdA / ytdP : null), fmtK(ytdA) + " / " + fmtK(ytdP) + " K") +
     stat("YTD实际 Growth", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
     stat(pLbl + "预估 (Act+FCST)", fmtK(fy) + "<span style='font-size:12px'> K</span>", "AOP " + fmtK(aop) + " K") +
     stat(pLbl + "预估达成 Ach%", '<span class="' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</span>", aop > 0 ? "缺口 " + fmtK(aop - fy) + " K" : "无指标") +
-    stat(pLbl + " GR% vs FY" + S.cfg.ly, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年 " + fmtK(ly) + " K") +
+    stat(pLbl + " GR% vs " + grCmpBase, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年同期 " + fmtK(ly) + " K") +
     (ver ? stat("VS上次预估版本", '<span class="' + clsSign(d) + '">' + (d === null ? "–" : fmtDK(d)) + " K</span>", esc(latestVerMeta().label)) : "") +
     (ver ? stat('<span style="color:var(--blue)">📊 预估准确率(上版vs实际)</span>',
       acc ? '<span class="' + accCls(acc.acc) + '">' + fmtPct(acc.acc) + "</span>" : '<span style="color:var(--mute)">–</span>',
@@ -1796,7 +2044,9 @@ function renderProgress() {
       '<span class="hint">已提交 ' + sub + ' / ' + list.length + ' 人</span>' +
       '<span class="num ' + pctCls(teamPct) + '" style="margin-left:auto;font-size:15px;font-weight:700">' + teamPct + '%</span>' +
       '</div>' +
-      '<div class="twrap"><table class="dt"><thead><tr>' +
+      '<div class="twrap"><table class="dt prog-tbl">' +
+      '<colgroup><col class="c-rep"><col class="c-st"><col class="c-pct"><col class="c-fill"><col class="c-upd"></colgroup>' +
+      '<thead><tr>' +
       '<th class="l stick1">代表</th><th>提交状态</th><th>完成度</th><th>已填 / 应填</th><th>最后更新</th>' +
       '</tr></thead><tbody>';
     for (const r of list) {
@@ -1848,10 +2098,11 @@ async function renderDash() {
   const ms = getPeriodMonths(dp);
   const pShort = periodShort(dp);
 
-  /* 维度下钻筛选: 先应用各维度筛选 */
+  /* 维度下钻筛选: 当前维度 + 其它两个维度都可下钻 */
   if (!d.drillFilters) d.drillFilters = {};
   const otherDims = Object.keys(dimDefs).filter(k => k !== d.dim);
-  for (const dk of otherDims) {
+  const filterDims = [d.dim, ...otherDims]; /* 当前维度排最前, 作为主下钻 */
+  for (const dk of filterDims) {
     const fv = d.drillFilters[dk];
     if (fv && fv.length) entries = entries.filter(e => fv.includes(dimDefs[dk].f(e)));
   }
@@ -1860,6 +2111,37 @@ async function renderDash() {
   if (d.rsm && !rsms.includes(d.rsm)) d.rsm = "";
   if (d.rsm) entries = entries.filter(e => e.rsm === d.rsm);
   if (d.q) { const q = d.q.toLowerCase(); entries = entries.filter(e => (e.rep + e.prov + e.grp + e.dsm + e.rsm).toLowerCase().includes(q)); }
+
+  /* ★ 筛选联动：清理各维度中在当前其他筛选条件下不存在的值 */
+  let cleaned = false;
+  for (const dk of filterDims) {
+    const otherFilters = {};
+    for (const otherDk of filterDims) {
+      if (otherDk !== dk && d.drillFilters[otherDk] && d.drillFilters[otherDk].length) {
+        otherFilters[otherDk] = d.drillFilters[otherDk];
+      }
+    }
+    let baseEntries = scopedEntries();
+    if (d.rsm) baseEntries = baseEntries.filter(e => e.rsm === d.rsm);
+    for (const [fk, fv] of Object.entries(otherFilters)) {
+      baseEntries = baseEntries.filter(e => fv.includes(dimDefs[fk].f(e)));
+    }
+    const validVals = new Set(baseEntries.map(e => dimDefs[dk].f(e)).filter(Boolean));
+    const selected = d.drillFilters[dk] || [];
+    const validSelected = selected.filter(v => validVals.has(v));
+    if (validSelected.length !== selected.length) {
+      d.drillFilters[dk] = validSelected;
+      cleaned = true;
+    }
+  }
+  if (cleaned) {
+    entries = scopedEntries();
+    for (const dk of filterDims) {
+      const fv = d.drillFilters[dk];
+      if (fv && fv.length) entries = entries.filter(e => fv.includes(dimDefs[dk].f(e)));
+    }
+    if (d.rsm) entries = entries.filter(e => e.rsm === d.rsm);
+  }
 
   const rows = rollup(entries, dimDefs[d.dim].f);
   if (d.dim === "grp") rows.sort((a, b) => grpSortKey(a.dim).localeCompare(grpSortKey(b.dim)));
@@ -1888,21 +2170,33 @@ async function renderDash() {
     '<button class="btn pri sm" id="exp-xlsx" style="margin-left:auto">\u2b07 导出 Excel</button>' +
     "</div>";
 
-  /* 维度下钻筛选器行 */
-  html += '<div style="padding:6px 16px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">';
-  html += '<span class="hint" style="margin-right:4px">维度下钻筛选:</span>';
-  for (const dk of otherDims) {
-    const allVals = [...new Set(scopedEntries().map(e => dimDefs[dk].f(e)))].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh"));
+  /* 维度下钻筛选器行 (当前维度在最前, 标记为「主」) */
+  const activeDrill = filterDims.reduce((n, dk) => n + ((d.drillFilters[dk] || []).length ? 1 : 0), 0);
+  html += '<div class="drillbar">';
+  html += '<span class="drillbar-lab">▾ 下钻筛选</span>';
+  for (const dk of filterDims) {
+    const isCur = dk === d.dim;
+    const dimShort = dimDefs[dk].name.replace("维度", "");
+    /* 联动：应用除当前维度外的所有筛选条件（含 RSM 下拉框）提取可选值 */
+    let baseEntries = scopedEntries();
+    if (d.rsm) baseEntries = baseEntries.filter(e => e.rsm === d.rsm);
+    for (const otherDk of filterDims) {
+      if (otherDk !== dk && d.drillFilters[otherDk] && d.drillFilters[otherDk].length) {
+        baseEntries = baseEntries.filter(e => d.drillFilters[otherDk].includes(dimDefs[otherDk].f(e)));
+      }
+    }
+    const allVals = [...new Set(baseEntries.map(e => dimDefs[dk].f(e)))].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh"));
     const selected = d.drillFilters[dk] || [];
-    const triggerText = selected.length ? (selected.length === 1 ? esc(selected[0]) : '已选 ' + selected.length + ' 项') : '全部' + dimDefs[dk].name;
-    html += '<div class="ms-wrap" id="ms-wrap-' + dk + '" data-dk="' + dk + '">';
-    html += '<div class="ms-trigger" id="ms-trigger-' + dk + '">' + triggerText + '</div>';
+    const triggerText = selected.length ? (selected.length === 1 ? esc(selected[0]) : dimShort + ' · 已选 ' + selected.length) : '全部' + dimShort;
+    html += '<div class="ms-wrap' + (isCur ? ' primary' : '') + (selected.length ? ' active' : '') + '" id="ms-wrap-' + dk + '" data-dk="' + dk + '">';
+    html += '<div class="ms-trigger" id="ms-trigger-' + dk + '">' + (isCur ? '<span class="ms-cur">主</span>' : '') + '<span class="ms-trigger-txt">' + triggerText + '</span></div>';
     html += '<div class="ms-panel">';
-    html += '<label class="ms-all"><input type="checkbox" data-all="' + dk + '"' + (!selected.length ? ' checked' : '') + '> 全部' + dimDefs[dk].name + '</label>';
+    html += '<label class="ms-all"><input type="checkbox" data-all="' + dk + '"' + (!selected.length ? ' checked' : '') + '> 全部' + dimShort + '</label>';
     for (const v of allVals) html += '<label><input type="checkbox" data-dk="' + dk + '" value="' + esc(v) + '"' + (selected.includes(v) ? ' checked' : '') + '> ' + esc(v) + '</label>';
     html += '</div></div>';
   }
-  html += '<button class="btn sm" id="drill-clear">清除筛选</button>';
+  html += '<span class="drillbar-sp"></span>';
+  if (activeDrill) html += '<span class="drillbar-count">' + activeDrill + ' 个维度已筛选</span><button class="btn sm" id="drill-clear">清除筛选</button>';
   html += '</div>';
 
   html += monthChart(T.m, T.aopM, T.lyM) + "</div>";
@@ -2126,12 +2420,14 @@ async function renderDash() {
   $("#exp-xlsx").onclick = () => exportDashXlsx(rows, entries, ver, verMeta);
   $$(".dash-row").forEach(tr => tr.onclick = ev => { if (ev.target.closest("input")) return; const k = tr.dataset.dim; d.open.has(k) ? d.open.delete(k) : d.open.add(k); renderDash(); });
   
-  /* 多选下拉事件绑定 */
-  for (const dk of otherDims) {
+  /* 多选下拉事件绑定 (含当前维度) */
+  for (const dk of filterDims) {
     const wrap = $("#ms-wrap-" + dk);
     if (!wrap) continue;
     const trigger = $("#ms-trigger-" + dk);
+    const txtEl = trigger.querySelector(".ms-trigger-txt") || trigger;
     const panel = wrap.querySelector(".ms-panel");
+    const dimShort = dimDefs[dk].name.replace("维度", "");
     
     trigger.onclick = e => {
       e.stopPropagation();
@@ -2157,7 +2453,8 @@ async function renderDash() {
       }
       
       const selected = d.drillFilters[dk] || [];
-      trigger.textContent = selected.length ? (selected.length === 1 ? selected[0] : '已选 ' + selected.length + ' 项') : '全部' + dimDefs[dk].name;
+      wrap.classList.toggle("active", selected.length > 0);
+      txtEl.textContent = selected.length ? (selected.length === 1 ? selected[0] : dimShort + ' · 已选 ' + selected.length) : '全部' + dimShort;
     };
   }
   
@@ -3581,6 +3878,12 @@ function rerender() {
   renderCtx();
   if (S.tab === "fill") renderFill(); else if (S.tab === "progress") renderProgress(); else if (S.tab === "dash") renderDash(); else renderAdmin();
 }
+/* 屏幕在「桌面 ↔ 手机」断点间切换时, 自动重渲当前页以切换宽表/卡片视图 */
+(function () {
+  const onBpChange = () => { if (S.master && S.cfg) rerender(); };
+  if (mqMobile.addEventListener) mqMobile.addEventListener("change", onBpChange);
+  else if (mqMobile.addListener) mqMobile.addListener(onBpChange);
+})();
 function switchTab(t) {
   if (t === "admin" && !(S.me && S.me.role === "admin")) { renderGate(); return; }
   // 切换 tab 前把未落盘的填写保存掉
