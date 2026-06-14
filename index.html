@@ -848,7 +848,7 @@ const S = {
   fillGrp: "",
   _dirtyReps: new Set(),
   dash: { dim: "grp", metric: "amt", cmp: "latest", rsm: "", q: "", months: false, open: new Set(), period: "FY", fProv: [], fGrp: [], fRep: [], fDsm: [] },
-  report: { dim: "grp", ytdN: 0, metric: "amt", drillFilters: {} },
+  report: { dim: "grp", ytdN: 0, metric: "amt", drillFilters: {}, hidePeriods: [], dataMode: "mgr", sort: null },
   _dashClickHandler: null,
   pendingImport: null
 };
@@ -1010,13 +1010,13 @@ function periodColHeaders(p, cfg, hasVer) {
 }
 
 /* 把"主数据 + 各代表填写"合成统一条目列表 */
-function buildEntries() {
+function buildEntries(rawOnly) {
   if (!S.master || !S.cfg) return [];
   const actSet = new Set(S.cfg.actMonths || []);
   const qtySet = new Set(S.cfg.qtyGroups || []);
   const out = [];
   const seen = new Set();
-  const mv = isMgrView();
+  const mv = rawOnly ? false : isMgrView();
   const mk = (r, f, manual) => {
     const asp = rowASP(r);
     const qm = qtySet.has(r.grp);
@@ -3560,61 +3560,119 @@ function renderReport() {
   if (!r.ytdN) { const am = (S.cfg.actMonths || []); r.ytdN = am.length ? Math.max(...am) : 12; }
   if (!dimDefs[r.dim]) r.dim = "grp";
   if (!r.drillFilters) r.drillFilters = {};
+  if (!Array.isArray(r.hidePeriods)) r.hidePeriods = [];
+  if (r.dataMode !== "rep") r.dataMode = "mgr";
+
+  /* —— 口径 / 数据来源 —— */
+  const isAmt = r.metric !== "qty";
+  const mArr = isAmt ? "m" : "mq", aopArr = isAmt ? "aopA" : "aopQ2", lyArr = isAmt ? "lyA" : "lyQ2";
+  const vK = isAmt ? fmtK : fmtQ;
+  const rawOnly = r.dataMode === "rep";                 // 代表填写: 不套用管理调整层
+  /* 数据来源开关: 代表填写(原始) vs 管理调整后(最终) */
+  const repScoped = () => buildEntries(rawOnly).filter(inScope);
 
   /* 维度下钻筛选(与数据看板一致): 当前维度 + 其它维度都可多选下钻, 选项随其它筛选联动 */
   const filterDims = [r.dim, ...Object.keys(dimDefs).filter(k => k !== r.dim)];
   const applyDrill = es => { for (const dk of filterDims) { const fv = r.drillFilters[dk]; if (fv && fv.length) es = es.filter(e => fv.includes(dimDefs[dk].f(e))); } return es; };
-  let entries = applyDrill(scopedEntries());
+  let entries = applyDrill(repScoped());
 
   /* 级联清理: 去掉在其它筛选条件下已不存在的已选值 */
   let cleaned = false;
   for (const dk of filterDims) {
-    let base = scopedEntries();
+    let base = repScoped();
     for (const otherDk of filterDims) if (otherDk !== dk && r.drillFilters[otherDk] && r.drillFilters[otherDk].length) base = base.filter(e => r.drillFilters[otherDk].includes(dimDefs[otherDk].f(e)));
     const valid = new Set(base.map(e => dimDefs[dk].f(e)).filter(Boolean));
     const sel = r.drillFilters[dk] || [];
     const vsel = sel.filter(v => valid.has(v));
     if (vsel.length !== sel.length) { r.drillFilters[dk] = vsel; cleaned = true; }
   }
-  if (cleaned) entries = applyDrill(scopedEntries());
+  if (cleaned) entries = applyDrill(repScoped());
 
   const rows = rollup(entries, dimDefs[r.dim].f);   // rollup 默认按 AOP 降序
   if (r.dim === "grp") rows.sort((a, b) => grpSortKey(a.dim).localeCompare(grpSortKey(b.dim))); // 产品维度: 与数据看板一致, 按固定产品顺序排序
 
-  // 报表期间: 四个季度 + 上下半年 + YTD(截止月可选)
-  const periods = [
-    { key: "Q1", label: "Q1" }, { key: "Q2", label: "Q2" }, { key: "Q3", label: "Q3" }, { key: "Q4", label: "Q4" },
-    { key: "H1", label: "H1" }, { key: "H2", label: "H2" }, { key: "YTD-" + r.ytdN, label: "YTD" + r.ytdN }
+  // 报表期间: 四个季度 + 上下半年 + YTD(截止月可选) — 可被「显示期间」筛选器隐藏
+  const allPeriods = [
+    { key: "Q1", label: "Q1", mKey: "Q1" }, { key: "Q2", label: "Q2", mKey: "Q2" },
+    { key: "Q3", label: "Q3", mKey: "Q3" }, { key: "Q4", label: "Q4", mKey: "Q4" },
+    { key: "H1", label: "H1", mKey: "H1" }, { key: "H2", label: "H2", mKey: "H2" },
+    { key: "YTD", label: "YTD" + r.ytdN, mKey: "YTD-" + r.ytdN }
   ];
-  // 由 rollup 行的月度数组(blended 预估/实际 m[]、AOP aopA[]、去年 lyA[])按期间月份汇总
-  const calc = (o, pKey) => {
+  const periods = allPeriods.filter(p => !r.hidePeriods.includes(p.key));
+
+  // 按期间月份汇总当前口径(金额/数量)的 预估/AOP/去年
+  const calc = (o, mKey) => {
     let fy = 0, aop = 0, ly = 0;
-    for (const i of getPeriodMonths(pKey)) { fy += o.m[i] || 0; aop += o.aopA[i] || 0; ly += o.lyA[i] || 0; }
+    for (const i of getPeriodMonths(mKey)) { fy += o[mArr][i] || 0; aop += o[aopArr][i] || 0; ly += o[lyArr][i] || 0; }
     return { fy, aop, ly, ach: aop > 0 ? fy / aop : null, gr: ly > 0 ? (fy - ly) / ly : null };
   };
-  // 合计(对全部行的月度数组求和)
-  const tot = { m: zeros(), aopA: zeros(), lyA: zeros() };
-  for (const o of rows) for (let i = 0; i < 12; i++) { tot.m[i] += o.m[i] || 0; tot.aopA[i] += o.aopA[i] || 0; tot.lyA[i] += o.lyA[i] || 0; }
+  // 合计(对全部行的月度数组求和, 两种口径都备好)
+  const tot = { m: zeros(), mq: zeros(), aopA: zeros(), aopQ2: zeros(), lyA: zeros(), lyQ2: zeros() };
+  for (const o of rows) for (let i = 0; i < 12; i++) {
+    tot.m[i] += o.m[i] || 0; tot.mq[i] += o.mq[i] || 0;
+    tot.aopA[i] += o.aopA[i] || 0; tot.aopQ2[i] += o.aopQ2[i] || 0;
+    tot.lyA[i] += o.lyA[i] || 0; tot.lyQ2[i] += o.lyQ2[i] || 0;
+  }
 
-  // 三联单元格: 预估值K / 达成率(带形状符号) / 增长率
+  /* —— 排序: 点击任意列表头, 降序 → 升序 → 默认 —— */
+  const sortVal = (o, cid) => {
+    if (cid === "dim") return o.dim;
+    const dot = cid.lastIndexOf(".");
+    const pk = cid.slice(0, dot), field = cid.slice(dot + 1);
+    const p = allPeriods.find(x => x.key === pk);
+    if (!p) return null;
+    return calc(o, p.mKey)[field];
+  };
+  let sortedRows = rows.slice();
+  if (r.sort) {
+    const dir = r.sort.dir === "asc" ? 1 : -1, sid = r.sort.id;
+    sortedRows.sort((x, y) => {
+      const va = sortVal(x, sid), vb = sortVal(y, sid);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === "string" || typeof vb === "string") return String(va).localeCompare(String(vb), "zh") * dir;
+      return (va - vb) * dir;
+    });
+  }
+
+  // 三联单元格: 预估值 / 达成率(带形状符号) / 增长率
   const cells3 = c =>
-    '<td class="num">' + fmtK(c.fy) + '</td>' +
+    '<td class="num" style="border-left:2px solid var(--line)">' + vK(c.fy) + '</td>' +
     '<td class="num ' + clsAch(c.ach) + '">' + achSymHtml(c.ach) + fmtPct(c.ach) + '</td>' +
     '<td class="num ' + clsSign(c.gr) + '">' + fmtPct(c.gr) + '</td>';
+  const sortIco = cid => '<span class="sort-ico">' + (r.sort && r.sort.id === cid ? (r.sort.dir === "asc" ? "\u25b2" : "\u25bc") : "\u21c5") + '</span>';
+  const lbl = t => '<div style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:4px">' + t + '</div>';
 
   // —— 控制条 ——
   let h = '<div class="card"><div class="card-h"><b>管理报表</b><span class="hint">按维度查看各期间「预估值 / 达成率 / 增长率」</span></div><div style="padding:12px 16px 14px">';
-  h += '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">';
-  h += '<div><div style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:4px">维度</div><div class="seg" id="rep-dim-seg">' +
+  h += '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">';
+  // 维度
+  h += '<div>' + lbl("维度") + '<div class="seg" id="rep-dim-seg">' +
     Object.keys(dimDefs).map(k => '<button data-d="' + k + '" class="' + (r.dim === k ? "on" : "") + '">' + dimDefs[k].name + "</button>").join("") + "</div></div>";
-  h += '<div><div style="font-size:11.5px;color:var(--mute);font-weight:600;margin-bottom:4px">YTD 截止月份</div><select class="ctrl" id="rep-ytd" style="width:120px">' +
+  // 金额 K / 数量 切换器(与数据看板一致)
+  h += '<div>' + lbl("口径") + '<div class="seg" id="rep-met-seg">' +
+    '<button data-m="amt" class="' + (isAmt ? "on" : "") + '">金额 K</button>' +
+    '<button data-m="qty" class="' + (!isAmt ? "on" : "") + '">数量</button></div></div>';
+  // 代表填写 / 管理调整后 切换器
+  h += '<div>' + lbl("数据来源") + '<div class="seg" id="rep-data-seg">' +
+    '<button data-md="mgr" class="' + (!rawOnly ? "on" : "") + '">管理调整后</button>' +
+    '<button data-md="rep" class="' + (rawOnly ? "on" : "") + '">代表填写</button></div></div>';
+  // 显示期间(时间筛选器)
+  h += '<div>' + lbl("显示期间") + '<div class="seg" id="rep-period-seg">' +
+    allPeriods.map(p => '<button data-p="' + p.key + '" class="' + (!r.hidePeriods.includes(p.key) ? "on" : "") + '">' + p.key + "</button>").join("") + "</div></div>";
+  // YTD 截止月
+  h += '<div>' + lbl("YTD 截止月份") + '<select class="ctrl" id="rep-ytd" style="width:120px">' +
     MN.map((m, i) => '<option value="' + (i + 1) + '"' + (r.ytdN === i + 1 ? " selected" : "") + ">截至 " + m + "</option>").join("") + "</select></div>";
   h += '</div>';
-  h += '<div class="hint" style="margin-top:10px;line-height:1.7">范围:' + esc(scopeLabel()) + ' · 金额单位:<b>千元 K</b> · 预估值 = 已关账月实际 + 未关账月预估</div>';
+  h += '<div class="hint" style="margin-top:10px;line-height:1.7">范围:' + esc(scopeLabel()) +
+    ' · 口径:<b>' + (isAmt ? "金额(千元 K)" : "数量(件)") + '</b>' +
+    ' · 数据来源:<b style="color:' + (rawOnly ? "var(--blue)" : "var(--amber)") + '">' + (rawOnly ? "代表填写原始数" : "管理调整后最终数") + '</b>' +
+    ' · 预估值 = 已关账月实际 + 未关账月预估</div>';
   h += '<div class="hint" style="margin-top:4px">达成率符号(与数据看板一致):' +
     achSymHtml(1.05) + '<span style="color:var(--green)">达标 ≥100%</span> &nbsp; ' +
     achSymHtml(0.9) + '<span style="color:var(--amber)">接近 80–100%</span> &nbsp; ' +
-    achSymHtml(0.5) + '<span style="color:var(--red)">偏低 &lt;80%</span> · 增长率:绿=正 / 红=负</div>';
+    achSymHtml(0.5) + '<span style="color:var(--red)">偏低 &lt;80%</span> · 增长率:绿=正 / 红=负 · 点击列表头可排序 · 拖列右缘可调宽</div>';
 
   /* —— 下钻筛选器(与数据看板一致): 当前维度标「主」, 各维度多选, 选项随其它筛选联动 —— */
   const activeDrill = filterDims.reduce((n, dk) => n + ((r.drillFilters[dk] || []).length ? 1 : 0), 0);
@@ -3623,7 +3681,7 @@ function renderReport() {
   for (const dk of filterDims) {
     const isCur = dk === r.dim;
     const dimShort = dimDefs[dk].name.replace("维度", "");
-    let base = scopedEntries();
+    let base = repScoped();
     for (const otherDk of filterDims) if (otherDk !== dk && r.drillFilters[otherDk] && r.drillFilters[otherDk].length) base = base.filter(e => r.drillFilters[otherDk].includes(dimDefs[otherDk].f(e)));
     const allVals = [...new Set(base.map(e => dimDefs[dk].f(e)))].filter(Boolean).sort((a, b) => dk === "grp" ? grpSortKey(a).localeCompare(grpSortKey(b)) : a.localeCompare(b, "zh"));
     const selected = r.drillFilters[dk] || [];
@@ -3642,33 +3700,63 @@ function renderReport() {
   h += '</div></div>';
 
   // —— 报表表格 ——
-  h += '<div class="card"><div class="card-h"><b>' + dimDefs[r.dim].name + ' × 期间</b><span class="hint">达成率 = 预估÷AOP · 增长率 = (预估−去年同期)÷去年同期 · ' + (r.dim === "grp" ? "按产品固定顺序排列" : "按规模(AOP)降序") + "</span></div>";
+  h += '<div class="card"><div class="card-h"><b>' + dimDefs[r.dim].name + ' × 期间</b><span class="hint">达成率 = 预估÷AOP · 增长率 = (预估−去年同期)÷去年同期 · ' + (r.sort ? "按「" + esc(r.sort.id) + "」" + (r.sort.dir === "asc" ? "升序" : "降序") : (r.dim === "grp" ? "按产品固定顺序排列" : "按规模(AOP)降序")) + " · 点表头排序 · 拖列缘调宽</span></div>";
   h += '<div class="twrap"><table class="dt" id="report-tbl"><thead>';
-  // 第一行表头: 维度 + 各期间(跨3列)
-  h += '<tr><th class="l stick1" rowspan="2" style="min-width:150px">' + dimDefs[r.dim].name + "</th>" +
-    periods.map((p, idx) => '<th colspan="3" style="text-align:center;border-left:2px solid var(--line)' + (p.key.startsWith("YTD") ? ";background:var(--blue-soft,#EEF4FF)" : "") + '">' + p.label + "</th>").join("") + "</tr>";
-  // 第二行表头: 每期间下的 预估/达成%/增长%
-  h += "<tr>" + periods.map(p => '<th style="border-left:2px solid var(--line)">预估</th><th>达成%</th><th>增长%</th>').join("") + "</tr>";
-  h += "</thead><tbody>";
-  if (!rows.length) {
+  // 第一行表头: 维度(可排序/可调宽) + 各期间(跨3列)
+  h += '<tr><th class="l stick1 sortable' + (r.sort && r.sort.id === "dim" ? " sorted" : "") + '" data-cid="dim" rowspan="2" style="min-width:150px" title="点击排序 · 拖右缘调列宽">' + dimDefs[r.dim].name + sortIco("dim") + "</th>" +
+    periods.map(p => '<th colspan="3" style="text-align:center;border-left:2px solid var(--line)' + (p.key === "YTD" ? ";background:var(--blue-soft,#EEF4FF)" : "") + '">' + p.label + "</th>").join("") + "</tr>";
+  // 第二行表头: 每期间下的 预估/达成%/增长% — 每列可点击排序, 可拖宽
+  h += "<tr>";
+  for (const p of periods) {
+    const sub = [["fy", "预估"], ["ach", "达成%"], ["gr", "增长%"]];
+    sub.forEach(([f, labTxt], idx) => {
+      const cid = p.key + "." + f;
+      h += '<th class="sortable' + (r.sort && r.sort.id === cid ? " sorted" : "") + '" data-cid="' + cid + '"' + (idx === 0 ? ' style="border-left:2px solid var(--line)"' : "") + ' title="点击排序 · 拖右缘调列宽">' + labTxt + sortIco(cid) + "</th>";
+    });
+  }
+  h += "</tr></thead><tbody>";
+  if (!sortedRows.length) {
     h += '<tr><td class="l" colspan="' + (1 + periods.length * 3) + '" style="color:var(--mute);text-align:center;padding:18px">当前范围内没有数据</td></tr>';
   } else {
-    for (const o of rows) {
+    for (const o of sortedRows) {
       h += '<tr><td class="l stick1">' + esc(o.dim) + "</td>" +
-        periods.map(p => cells3(calc(o, p.key))).join("") + "</tr>";
+        periods.map(p => cells3(calc(o, p.mKey))).join("") + "</tr>";
     }
   }
   h += "</tbody><tfoot><tr class='total-row'><td class='l stick1'>合计</td>" +
-    periods.map(p => cells3(calc(tot, p.key))).join("") + "</tr></tfoot>";
+    periods.map(p => cells3(calc(tot, p.mKey))).join("") + "</tr></tfoot>";
   h += "</table></div></div>";
 
   host.innerHTML = h;
 
   // —— 绑定 ——
   const seg = $("#rep-dim-seg");
-  if (seg) seg.onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.d) { r.dim = b.dataset.d; r.drillFilters = {}; renderReport(); } };
+  if (seg) seg.onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.d) { r.dim = b.dataset.d; r.drillFilters = {}; r.sort = null; renderReport(); } };
+  const metSeg = $("#rep-met-seg");
+  if (metSeg) metSeg.onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.m) { r.metric = b.dataset.m; renderReport(); } };
+  const dataSeg = $("#rep-data-seg");
+  if (dataSeg) dataSeg.onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.md) { r.dataMode = b.dataset.md; renderReport(); } };
+  const perSeg = $("#rep-period-seg");
+  if (perSeg) perSeg.onclick = e => {
+    const b = e.target.closest("button"); if (!b || !b.dataset.p) return;
+    const pk = b.dataset.p; const hid = new Set(r.hidePeriods);
+    if (hid.has(pk)) hid.delete(pk);
+    else { if (allPeriods.length - hid.size <= 1) { toast("至少保留一个期间"); return; } hid.add(pk); }
+    r.hidePeriods = [...hid]; renderReport();
+  };
   const ytd = $("#rep-ytd");
   if (ytd) ytd.onchange = e => { r.ytdN = parseInt(e.target.value) || 12; renderReport(); };
+
+  /* 列表头点击排序(维度列 + 各期间子列) */
+  $$("#report-tbl thead th[data-cid]").forEach(th => {
+    th.addEventListener("click", e => {
+      if (e.target.closest(".resize-handle")) return;
+      const cid = th.dataset.cid;
+      if (r.sort && r.sort.id === cid) r.sort = r.sort.dir === "desc" ? { id: cid, dir: "asc" } : null;
+      else r.sort = { id: cid, dir: "desc" };
+      renderReport();
+    });
+  });
 
   /* 下钻多选下拉(与数据看板一致): 选中即时记录, 关闭面板时重算联动并刷新 */
   for (const dk of filterDims) {
@@ -3705,6 +3793,16 @@ function renderReport() {
   };
   document.addEventListener("click", S._reportClickHandler);
   if ($("#rep-drill-clear")) $("#rep-drill-clear").onclick = () => { r.drillFilters = {}; renderReport(); };
+
+  /* 列宽拖拽(与数据看板一致, 记忆列宽). 报表为两行表头, 显式传入叶子列单元格 */
+  requestAnimationFrame(() => {
+    const tbl = $("#report-tbl");
+    if (tbl && tbl.tHead && tbl.tHead.rows.length >= 2) {
+      const dimTh = tbl.tHead.rows[0].cells[0];
+      const leafCells = [...tbl.tHead.rows[1].cells];
+      initResizableTable(tbl, "report", [dimTh, ...leafCells]);
+    }
+  });
 }
 
 /* =================== 管理后台 =================== */
@@ -4178,9 +4276,9 @@ function switchTab(t) {
 }
 /* 表格列宽拖拽: colgroup + table-layout:fixed + pointer capture + rAF 节流, 平滑不抖动
    key: 传入后按列 id 记忆用户调过的宽度(本次会话内切换/刷新视图不丢) */
-function initResizableTable(table, key) {
+function initResizableTable(table, key, thsOverride) {
   if (!table || !table.tHead || !table.tHead.rows.length) return;
-  const ths = [...table.tHead.rows[0].cells];
+  const ths = thsOverride && thsOverride.length ? thsOverride.slice() : [...table.tHead.rows[0].cells];
   if (!ths.length) return;
   let cg = table.querySelector(":scope > colgroup.rz-cols");
   if (!cg) {
