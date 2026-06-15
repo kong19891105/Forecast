@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>预估收集工具 · 月度滚动预估</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --ink:#152235; --ink2:#354764; --mute:#6E7E96;
@@ -699,6 +700,9 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 "use strict";
 // ★ 改为你的 GitHub 数据包 Raw URL（以 https://raw.githubusercontent.com/ 开头）
 const CLOUD_URL = "https://raw.githubusercontent.com/kong19891105/Forecast/refs/heads/main/data.json";
+/* ★ Supabase 配置: 填入 Project URL 和 Anon Key 即可启用在线实时同步 */
+const SUPABASE_URL = "";
+const SUPABASE_KEY = "";
 const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -734,46 +738,75 @@ const Store = {
   shared: false,
   mem: {},
   ls: null,
+  sb: null,
+  sbEnabled: false,
   async init() {
     try { if (window.storage && typeof window.storage.get === "function") { await window.storage.list("fc-", true); this.shared = true; } } catch (e) { this.shared = false; }
     if (!this.shared) { try { const t = "__fc_t__"; localStorage.setItem(t, "1"); localStorage.removeItem(t); this.ls = localStorage; } catch (e) { this.ls = null; } }
+    /* ★ Supabase 在线存储初始化 */
+    if (!this.shared && typeof window.supabase !== "undefined") {
+      let sbUrl = SUPABASE_URL, sbKey = SUPABASE_KEY;
+      try { const c = this.ls ? JSON.parse(this.ls.getItem("fc-supabase-config") || "{}") : {}; if (c.url) sbUrl = c.url; if (c.key) sbKey = c.key; } catch (e) {}
+      if (sbUrl && sbKey) {
+        try { this.sb = window.supabase.createClient(sbUrl, sbKey); this.sbEnabled = true; } catch (e) { console.error("Supabase init failed:", e); this.sbEnabled = false; }
+      }
+    }
   },
   _lsGet(k) { try { const v = this.ls.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
   _lsSet(k, v) { try { this.ls.setItem(k, JSON.stringify(v)); return true; } catch (e) { console.error(e); toast("⚠ 本地存储写入失败(可能空间已满)"); return false; } },
   async get(k) {
     if (this.shared) { try { const r = await window.storage.get(k, true); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    if (this.sbEnabled && this.sb) {
+      try { const { data, error } = await this.sb.from("fc_data").select("data").eq("key", k).single(); if (!error && data) { if (this.ls) this._lsSet("fcv5:" + k, data.data); return data.data; } } catch (e) {}
+    }
     if (this.ls) return this._lsGet("fcv5:" + k);
     return this.mem[k] !== undefined ? this.mem[k] : null;
   },
   async set(k, v) {
+    let ok = true;
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), true); return !!r; } catch (e) { console.error(e); toast("⚠ 共享存储写入失败"); return false; } }
-    if (this.ls) return this._lsSet("fcv5:" + k, v);
-    this.mem[k] = JSON.parse(JSON.stringify(v)); return true;
+    if (this.sbEnabled && this.sb) {
+      try { const { error } = await this.sb.from("fc_data").upsert({ key: k, data: v, updated_at: new Date().toISOString() }, { onConflict: "key" }); if (error) { ok = false; console.error("Supabase write error:", error); } } catch (e) { ok = false; }
+    }
+    if (this.ls) { this._lsSet("fcv5:" + k, v); }
+    else this.mem[k] = JSON.parse(JSON.stringify(v));
+    return ok;
   },
   async del(k) {
     if (this.shared) { try { await window.storage.delete(k, true); } catch (e) {} }
-    else if (this.ls) { try { this.ls.removeItem("fcv5:" + k); } catch (e) {} }
+    if (this.sbEnabled && this.sb) { try { await this.sb.from("fc_data").delete().eq("key", k); } catch (e) {} }
+    if (this.ls) { try { this.ls.removeItem("fcv5:" + k); } catch (e) {} }
     else delete this.mem[k];
   },
   async list(prefix) {
     if (this.shared) { try { const r = await window.storage.list(prefix, true); return (r && r.keys) ? r.keys.map(x => typeof x === "string" ? x : x.key) : []; } catch (e) { return []; } }
+    if (this.sbEnabled && this.sb) {
+      try { const { data, error } = await this.sb.from("fc_data").select("key").like("key", prefix + "%"); if (!error && data) return data.map(x => x.key); } catch (e) {}
+    }
     if (this.ls) { const out = []; const p = "fcv5:" + prefix; for (let i = 0; i < this.ls.length; i++) { const k = this.ls.key(i); if (k && k.startsWith(p)) out.push(k.slice(5)); } return out; }
     return Object.keys(this.mem).filter(k => k.startsWith(prefix));
   },
   /* 个人空间(shared=false): 每个使用者各自一份,用于记住身份 */
   async pget(k) {
     if (this.shared) { try { const r = await window.storage.get(k, false); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
+    if (this.sbEnabled && this.sb) {
+      try { const pk = "p:" + k; const { data, error } = await this.sb.from("fc_data").select("data").eq("key", pk).single(); if (!error && data) return data.data; } catch (e) {}
+    }
     if (this.ls) return this._lsGet("fcv5p:" + k);
     return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
   },
   async pset(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), false); return !!r; } catch (e) { return false; } }
+    if (this.sbEnabled && this.sb) {
+      try { const pk = "p:" + k; const { error } = await this.sb.from("fc_data").upsert({ key: pk, data: v, updated_at: new Date().toISOString() }, { onConflict: "key" }); if (error) console.error("Supabase pset error:", error); } catch (e) {}
+    }
     if (this.ls) return this._lsSet("fcv5p:" + k, v);
     this.mem["p:" + k] = JSON.parse(JSON.stringify(v)); return true;
   },
   async pdel(k) {
     if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} }
-    else if (this.ls) { try { this.ls.removeItem("fcv5p:" + k); } catch (e) {} }
+    if (this.sbEnabled && this.sb) { try { await this.sb.from("fc_data").delete().eq("key", "p:" + k); } catch (e) {} }
+    if (this.ls) { try { this.ls.removeItem("fcv5p:" + k); } catch (e) {} }
     else delete this.mem["p:" + k];
   }
 };
@@ -3888,6 +3921,25 @@ function renderAdmin() {
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="ad-clearmgr">🧹 清除管理调整数据</button><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:6px 0 0">「清除管理调整」只移除 DSM/RSM/管理员的橙色调整,可按 人员 / 产品组 / 省份 选择性清除,代表原始提交保留;「清空全部数据」则删除所有数据。</p></div></div>';
   h += "</div>";
+  /* ⑦ Supabase 云端配置（在线提交） */
+  h += '<div class="card"><div class="card-h"><b>⑦ Supabase 云端配置（在线提交）</b></div><div style="padding:14px 16px;font-size:13px">';
+  const sbCfg = JSON.parse((localStorage && localStorage.getItem("fc-supabase-config")) || "{}");
+  h += '<p style="color:var(--mute);font-size:12px;margin-bottom:10px">配置后代表填写数据将<b>实时同步到云端</b>，管理员刷新页面即可看到最新数据，无需再收邮件合并 Excel。每月只需在后台「导入系统数据」即可，团队打开链接直接填写。</p>';
+  h += '<div class="field" style="margin-bottom:8px"><label>Supabase Project URL</label><input class="ctrl" id="sb-url" style="width:100%" value="' + esc(sbCfg.url || SUPABASE_URL) + '" placeholder="https://xxxx.supabase.co"></div>';
+  h += '<div class="field" style="margin-bottom:8px"><label>Supabase Anon Key</label><input class="ctrl" id="sb-key" style="width:100%" value="' + esc(sbCfg.key || SUPABASE_KEY) + '" placeholder="eyJ..."></div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">';
+  h += '<button class="btn pri sm" id="sb-save">💾 保存配置并连接</button>';
+  h += '<button class="btn sm" id="sb-test">🔌 测试连接</button>';
+  h += '<button class="btn sm" id="sb-push">☁ 推送全部数据到云端</button>';
+  h += '<button class="btn sm" id="sb-pull">☁ 从云端拉取全部数据</button>';
+  h += '</div>';
+  h += '<div id="sb-state" style="margin-top:8px;font-size:12px"></div>';
+  h += '<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"><p style="color:var(--mute);font-size:12px"><b>首次使用步骤：</b>1) 在 Supabase 新建项目 → 2) SQL Editor 执行下方建表语句 → 3) 复制 Project URL 和 Anon Key 填入上方 → 4) 保存配置 → 5) 点击「推送全部数据」把现有数据上传到云端 → 6) 把链接发给团队，大家打开即用，数据实时同步。</p>';
+  h += '<textarea class="ctrl" style="width:100%;height:110px;font-size:11px;margin-top:6px" readonly onclick="this.select()">create table fc_data (key text primary key, data jsonb, updated_at timestamptz default now());
+alter table fc_data enable row level security;
+create policy "Allow all" on fc_data for all using (true) with check (true);</textarea>';
+  h += '</div></div>';
+
   /* ⑦ 流程说明 */
   h += '<div class="card" style="margin-top:16px"><div class="card-h"><b>📖 每月标准流程</b></div><div style="padding:14px 18px"><ol class="steps">' +
     "<li><b>系统导出</b> detail 明细。任何人员变动、新产品、岗位空缺都<b>不需要</b>预处理。</li>" +
@@ -3945,6 +3997,39 @@ function renderAdmin() {
   });
   $("#ad-clear").onclick = openClearAll;
   if ($("#ad-clearmgr")) $("#ad-clearmgr").onclick = openClearMgr;
+  /* ★ Supabase 配置绑定 */
+  if ($("#sb-save")) $("#sb-save").onclick = () => {
+    const url = $("#sb-url").value.trim(), key = $("#sb-key").value.trim();
+    localStorage.setItem("fc-supabase-config", JSON.stringify({ url, key }));
+    $("#sb-state").innerHTML = '<span style="color:var(--green)">✓ 配置已保存，刷新页面后生效</span>';
+    toast("Supabase 配置已保存，请刷新页面");
+  };
+  if ($("#sb-test")) $("#sb-test").onclick = async () => {
+    const url = $("#sb-url").value.trim(), key = $("#sb-key").value.trim();
+    if (!url || !key) { toast("请填写 URL 和 Key"); return; }
+    try {
+      const client = window.supabase.createClient(url, key);
+      const { data, error } = await client.from("fc_data").select("count", { count: "exact", head: true });
+      if (error) throw error;
+      $("#sb-state").innerHTML = '<span style="color:var(--green)">✓ 连接成功，fc_data 表存在</span>';
+      toast("Supabase 连接成功");
+    } catch (e) {
+      $("#sb-state").innerHTML = '<span style="color:var(--red)">✗ 连接失败: ' + esc(e.message || e) + '</span>';
+      toast("连接失败: " + (e.message || e));
+    }
+  };
+  if ($("#sb-push")) $("#sb-push").onclick = async () => {
+    if (!Store.sbEnabled) { toast("Supabase 未连接，请先保存配置并刷新页面"); return; }
+    toast("正在推送全部数据到云端 …");
+    let n = 0;
+    for (const k of await Store.list("fc-")) { const d = await Store.get(k); if (d !== null) { await Store.set(k, d); n++; } }
+    toast("已推送 " + n + " 条数据到 Supabase");
+  };
+  if ($("#sb-pull")) $("#sb-pull").onclick = async () => {
+    if (!Store.sbEnabled) { toast("Supabase 未连接，请先保存配置并刷新页面"); return; }
+    toast("正在从 Supabase 拉取全部数据 …");
+    await loadAll(); rerender(); toast("已拉取最新数据");
+  };
   renderPinStates();
   renderPersonalPins();
 }
@@ -4424,7 +4509,8 @@ async function cloudPull(force) {
 async function init() {
   await Store.init();
   // 云端模式：每次打开都检查云端是否有新数据包(同一包不会重复写入)
-  if (cloudMode()) await cloudPull(false);
+  // ★ Supabase 优先: 如果启用了 Supabase, 跳过 GitHub 数据包自动拉取(数据已实时同步)
+  if (!Store.sbEnabled && cloudMode()) await cloudPull(false);
   /* 初始化水印 */
   const wm = $("#watermark");
   if (wm) {
@@ -4440,7 +4526,8 @@ async function init() {
     wm.innerHTML = s;
   }
   const b = $("#sync-badge");
-  if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
+  if (Store.sbEnabled) { b.textContent = "☁ Supabase 在线"; b.title = "数据实时同步到云端,所有人共用一份数据,无需导文件"; b.className = "sync-badge live"; }
+  else if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
   else if (cloudMode()) { b.textContent = "☁ 云端模式"; b.title = "管理员上传数据包后,其他人打开网页自动拉取最新数据"; b.style.background = "#EDF3FF"; b.style.color = "#2458E6"; b.style.borderColor = "#B9CDF5"; }
   else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本浏览器;请用管理后台的数据包导出/导入接力"; }
   await loadAll();
@@ -4451,8 +4538,11 @@ async function init() {
   $("#btn-me").onclick = () => renderGate();
   $("#btn-help") && ($("#btn-help").onclick = () => openManual());
   $("#btn-chgpwd").onclick = () => openChangePasswordModal();
-  $("#btn-cloud").onclick = async () => { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); };
-  if (cloudMode()) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
+  $("#btn-cloud").onclick = async () => {
+    if (Store.sbEnabled) { toast("正在从 Supabase 拉取最新数据 …"); await loadAll(); rerender(); renderCtx(); toast("已拉取最新数据"); }
+    else { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); }
+  };
+  if (cloudMode() || Store.sbEnabled) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
   $("#btn-refresh").onclick = async () => { toast("正在刷新 …"); await loadAll(); await validateMe(); applyMe(); rerender(); if (!S.me) renderGate(); else toast("已读取最新数据"); };
   $("#mask").addEventListener("click", e => { if (S.gateOpen) return; if (e.target === $("#mask")) closeModal(); });
   $("#file-xlsx").addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onXlsxFile(f); });
