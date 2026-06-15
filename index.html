@@ -700,9 +700,9 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
 "use strict";
 // ★ 改为你的 GitHub 数据包 Raw URL（以 https://raw.githubusercontent.com/ 开头）
 const CLOUD_URL = "https://raw.githubusercontent.com/kong19891105/Forecast/refs/heads/main/data.json";
-/* ★ Supabase 配置: 填入 Project URL 和 Anon Key 即可启用在线实时同步 */
-const SUPABASE_URL = "";
-const SUPABASE_KEY = "";
+/* ★ Supabase 配置: 填入 Project URL 和 Anon/Publishable Key 即可启用在线实时同步 */
+const SUPABASE_URL = "https://hhhzeeijhpivdpzrzcpt.supabase.co";
+const SUPABASE_KEY = "sb_publishable_id8zrD4b8wLQ6ujAGOmROQ_E0qG1tlb";
 const MN = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -786,28 +786,39 @@ const Store = {
     if (this.ls) { const out = []; const p = "fcv5:" + prefix; for (let i = 0; i < this.ls.length; i++) { const k = this.ls.key(i); if (k && k.startsWith(p)) out.push(k.slice(5)); } return out; }
     return Object.keys(this.mem).filter(k => k.startsWith(prefix));
   },
-  /* 个人空间(shared=false): 每个使用者各自一份,用于记住身份 */
+  /* 个人空间(shared=false): 每个使用者/每台设备各自一份,用于记住身份。
+     ★ 注意: Supabase 模式下绝不写共享表 —— 否则所有人的身份会写到同一条记录互相覆盖。
+     身份属于"每台设备本地",这里固定用 window.storage(per-user) 或 localStorage。 */
   async pget(k) {
     if (this.shared) { try { const r = await window.storage.get(k, false); return r && r.value != null ? JSON.parse(r.value) : null; } catch (e) { return null; } }
-    if (this.sbEnabled && this.sb) {
-      try { const pk = "p:" + k; const { data, error } = await this.sb.from("fc_data").select("data").eq("key", pk).single(); if (!error && data) return data.data; } catch (e) {}
-    }
     if (this.ls) return this._lsGet("fcv5p:" + k);
     return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
   },
   async pset(k, v) {
     if (this.shared) { try { const r = await window.storage.set(k, JSON.stringify(v), false); return !!r; } catch (e) { return false; } }
-    if (this.sbEnabled && this.sb) {
-      try { const pk = "p:" + k; const { error } = await this.sb.from("fc_data").upsert({ key: pk, data: v, updated_at: new Date().toISOString() }, { onConflict: "key" }); if (error) console.error("Supabase pset error:", error); } catch (e) {}
-    }
     if (this.ls) return this._lsSet("fcv5p:" + k, v);
     this.mem["p:" + k] = JSON.parse(JSON.stringify(v)); return true;
   },
   async pdel(k) {
     if (this.shared) { try { await window.storage.delete(k, false); } catch (e) {} }
-    if (this.sbEnabled && this.sb) { try { await this.sb.from("fc_data").delete().eq("key", "p:" + k); } catch (e) {} }
     if (this.ls) { try { this.ls.removeItem("fcv5p:" + k); } catch (e) {} }
     else delete this.mem["p:" + k];
+  },
+  /* 仅本地缓存读取(同步, 不发任何网络请求): 用于首屏即时渲染, 之后再后台从云端/Supabase刷新 */
+  getLocal(k) {
+    if (this.shared) return null;            // 共享模式无本地缓存层, 首屏走正常异步 loadAll
+    if (this.ls) return this._lsGet("fcv5:" + k);
+    return this.mem[k] !== undefined ? this.mem[k] : null;
+  },
+  listLocal(prefix) {
+    if (this.shared) return [];
+    if (this.ls) { const out = []; const p = "fcv5:" + prefix; for (let i = 0; i < this.ls.length; i++) { const k = this.ls.key(i); if (k && k.startsWith(p)) out.push(k.slice(5)); } return out; }
+    return Object.keys(this.mem).filter(k => k.startsWith(prefix));
+  },
+  pgetLocal(k) {
+    if (this.shared) return null;
+    if (this.ls) return this._lsGet("fcv5p:" + k);
+    return this.mem["p:" + k] !== undefined ? this.mem["p:" + k] : null;
   }
 };
 
@@ -939,18 +950,22 @@ function aggregateRows(rows, C) {
 }
 
 /* =================== 数据装载 =================== */
-async function loadAll() {
-  S.cfg = await Store.get("fc-cfg");
-  S.master = await Store.get("fc-master");
+async function loadAll(local) {
+  const get = local ? (k => Store.getLocal(k)) : (k => Store.get(k));
+  const list = local ? (p => Store.listLocal(p)) : (p => Store.list(p));
+  S.cfg = await get("fc-cfg");
+  S.master = await get("fc-master");
   S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
-  S.dashComments = await Store.get("fc-dash-comments") || {};
+  S.dashComments = await get("fc-dash-comments") || {};
   if (S.master) for (const r of S.master.rows) {
     S.idx.set(rowKey(r.rep, r.prov, r.grp), r);
     if (!S.repInfo.has(r.rep)) S.repInfo.set(r.rep, { rsm: r.rsm, dsm: r.dsm });
   }
-  const fk = await Store.list("fc-f-");
-  for (const k of fk) { const d = await Store.get(k); if (d && d.rep) S.fcs.set(d.rep, d); }
-  S.mgr = await Store.get("fc-mgr") || { updatedAt: 0, rows: {} };
+  const fk = await list("fc-f-");
+  // ★ 并行读取各代表预估(原来是串行, Supabase 在线模式下 75+ 次串行往返会让首屏长时间空白)
+  const docs = await Promise.all(fk.map(k => get(k)));
+  for (const d of docs) if (d && d.rep) S.fcs.set(d.rep, d);
+  S.mgr = await get("fc-mgr") || { updatedAt: 0, rows: {} };
   S._mgrDirty = false;
 }
 async function getVersion(id) {
@@ -3935,9 +3950,9 @@ function renderAdmin() {
   h += '</div>';
   h += '<div id="sb-state" style="margin-top:8px;font-size:12px"></div>';
   h += '<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"><p style="color:var(--mute);font-size:12px"><b>首次使用步骤：</b>1) 在 Supabase 新建项目 → 2) SQL Editor 执行下方建表语句 → 3) 复制 Project URL 和 Anon Key 填入上方 → 4) 保存配置 → 5) 点击「推送全部数据」把现有数据上传到云端 → 6) 把链接发给团队，大家打开即用，数据实时同步。</p>';
-  h += '<textarea class="ctrl" style="width:100%;height:110px;font-size:11px;margin-top:6px" readonly onclick="this.select()">create table fc_data (key text primary key, data jsonb, updated_at timestamptz default now());
-alter table fc_data enable row level security;
-create policy "Allow all" on fc_data for all using (true) with check (true);</textarea>';
+  h += '<textarea class="ctrl" style="width:100%;height:110px;font-size:11px;margin-top:6px" readonly onclick="this.select()">create table fc_data (key text primary key, data jsonb, updated_at timestamptz default now());\n' +
+    'alter table fc_data enable row level security;\n' +
+    'create policy "Allow all" on fc_data for all using (true) with check (true);</textarea>';
   h += '</div></div>';
 
   /* ⑦ 流程说明 */
@@ -4451,7 +4466,12 @@ async function cloudFetch(silent) {
   let lastErr = "";
   for (const url of urls) {
     try {
-      const resp = await fetch(url, { cache: "no-store" });
+      // ★ 加超时:被墙或无响应时最多等 8 秒即失败,避免 fetch 无限期挂起拖死页面
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      let resp;
+      try { resp = await fetch(url, { cache: "no-store", signal: ctrl.signal }); }
+      finally { clearTimeout(timer); }
           if (resp.ok) {
         const d = await resp.json();
         if (!d || d.kind !== "fc-package") throw new Error("JSON 格式不符 (kind != fc-package)");
@@ -4461,7 +4481,7 @@ async function cloudFetch(silent) {
       }
       lastErr = "HTTP " + resp.status + (resp.status === 404 ? " (文件不存在)" : resp.status === 403 ? " (仓库需设为公开 Public)" : "");
     } catch (e) {
-      lastErr = (e.message || e);
+      lastErr = (e && e.name === "AbortError") ? "请求超时(8秒)" : (e.message || e);
     }
   }  // end URL loop
   if (!silent) {
@@ -4508,10 +4528,8 @@ async function cloudPull(force) {
 }
 async function init() {
   await Store.init();
-  // 云端模式：每次打开都检查云端是否有新数据包(同一包不会重复写入)
-  // ★ Supabase 优先: 如果启用了 Supabase, 跳过 GitHub 数据包自动拉取(数据已实时同步)
-  if (!Store.sbEnabled && cloudMode()) await cloudPull(false);
-  /* 初始化水印 */
+
+  /* —— 先把页面外壳渲染出来:水印 / 状态徽标 / 事件绑定(全部不依赖网络) —— */
   const wm = $("#watermark");
   if (wm) {
     const text = "Designed by Kong, 仅波士顿科学内部使用";
@@ -4526,21 +4544,19 @@ async function init() {
     wm.innerHTML = s;
   }
   const b = $("#sync-badge");
-  if (Store.sbEnabled) { b.textContent = "☁ Supabase 在线"; b.title = "数据实时同步到云端,所有人共用一份数据,无需导文件"; b.className = "sync-badge live"; }
-  else if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
-  else if (cloudMode()) { b.textContent = "☁ 云端模式"; b.title = "管理员上传数据包后,其他人打开网页自动拉取最新数据"; b.style.background = "#EDF3FF"; b.style.color = "#2458E6"; b.style.borderColor = "#B9CDF5"; }
-  else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本浏览器;请用管理后台的数据包导出/导入接力"; }
-  await loadAll();
-  // 任何模式下都恢复身份（云端/本地用 localStorage 存，共享模式用 window.storage）
-  { S.me = await Store.pget("fc-me"); await validateMe(); }
-  if (S.me && S.me.role === "rep") S.curRep = S.me.name;
+  if (b) {
+    if (Store.sbEnabled) { b.textContent = "☁ Supabase 在线"; b.title = "数据实时同步到云端,所有人共用一份数据,无需导文件"; b.className = "sync-badge live"; }
+    else if (Store.shared) { b.textContent = "🟢 共享模式"; b.title = "所有人打开同一发布链接,实时共用一份数据"; b.style.background = "#E7F6EC"; b.style.color = "#1E7B3C"; b.style.borderColor = "#BFE5CC"; }
+    else if (cloudMode()) { b.textContent = "☁ 云端模式"; b.title = "管理员上传数据包后,其他人打开网页自动拉取最新数据"; b.style.background = "#EDF3FF"; b.style.color = "#2458E6"; b.style.borderColor = "#B9CDF5"; }
+    else { b.textContent = "💾 本地模式"; b.title = "数据仅保存在本浏览器;请用管理后台的数据包导出/导入接力"; }
+  }
   $$(".tabs .tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
   $("#btn-me").onclick = () => renderGate();
   $("#btn-help") && ($("#btn-help").onclick = () => openManual());
   $("#btn-chgpwd").onclick = () => openChangePasswordModal();
   $("#btn-cloud").onclick = async () => {
-    if (Store.sbEnabled) { toast("正在从 Supabase 拉取最新数据 …"); await loadAll(); rerender(); renderCtx(); toast("已拉取最新数据"); }
-    else { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else rerender(); renderCtx(); }
+    if (Store.sbEnabled) { toast("正在从 Supabase 拉取最新数据 …"); await loadAll(); await validateMe(); applyMe(); rerender(); renderCtx(); if (!S.me) renderGate(); else toast("已拉取最新数据"); }
+    else { toast("正在从 GitHub 拉取 …"); const ok = await cloudPull(true); if (!ok) toast("⚠ 拉取失败,请检查 CLOUD_URL 和网络"); else { rerender(); renderCtx(); } }
   };
   if (cloudMode() || Store.sbEnabled) { const bc = $("#btn-cloud"); if (bc) bc.style.display = ""; }
   $("#btn-refresh").onclick = async () => { toast("正在刷新 …"); await loadAll(); await validateMe(); applyMe(); rerender(); if (!S.me) renderGate(); else toast("已读取最新数据"); };
@@ -4550,9 +4566,35 @@ async function init() {
   $("#file-reps").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importRepFiles(fs); });
   $("#file-reps-xlsx").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) importRepXlsxFiles(fs); });
   window.addEventListener("beforeunload", () => { flushDirtyReps(false); });
+
+  /* —— 首屏:本地缓存优先即时渲染,绝不等待网络。
+        Supabase / 云端模式下用本地缓存先出界面(没缓存就先出空壳+身份选择),
+        网络拉取放到后台进行 —— 这样即使 GitHub 被墙 / Supabase 慢,页面也不会卡死。 —— */
+  const firstLocal = !Store.shared && (Store.sbEnabled || cloudMode());
+  await loadAll(firstLocal);
+  S.me = firstLocal ? Store.pgetLocal("fc-me") : await Store.pget("fc-me");
+  await validateMe();
+  if (S.me && S.me.role === "rep") S.curRep = S.me.name;
   applyMe();
   rerender();
   if (!S.me) renderGate();
+
+  /* —— 后台拉取云端/Supabase 最新数据,完成后再静默刷新界面(不阻塞首屏) —— */
+  syncLatestInBackground();
+}
+
+async function syncLatestInBackground() {
+  try {
+    if (Store.sbEnabled) {
+      await loadAll(false);                 // 从 Supabase 拉全量(已并行)
+      S.me = await Store.pget("fc-me"); await validateMe();
+      if (S.me && S.me.role === "rep") S.curRep = S.me.name;
+      applyMe(); rerender(); if (!S.me && !S.gateOpen) renderGate();
+    } else if (cloudMode()) {
+      const ok = await cloudPull(false);    // 内部含 loadAll;有更新才返回 true
+      if (ok) { applyMe(); rerender(); if (typeof renderCtx === "function") renderCtx(); if (!S.me && !S.gateOpen) renderGate(); }
+    }
+  } catch (e) { console.error("background sync failed:", e); }
 }
 init();
 </script>
