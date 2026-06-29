@@ -200,8 +200,71 @@ table.dt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;w
   background:#E8ECF3;font-weight:700;border-top:2px solid var(--line2);
   position:sticky;bottom:0;z-index:2;
 }
+/* ★ 永久修复:合计行「首列」是左下角的双向固定单元格(既要横向 left:0 固定、又要纵向 bottom:0 固定)。
+   它必须比"普通首列(z-index 2)"和"合计行其它单元格(z-index 2)"都高,否则横向滚动时会被滑过来的
+   数字单元格盖住,看起来像"没固定"。这里用更高优先级的选择器一次性显式声明四要素(sticky/left/bottom/z-index/底色),
+   覆盖所有表格(管理报表 / 数据看板 / 填写预估 / 鞘填写 / 鞘看板),无论各表如何拼 HTML 都不会再失效。 */
+.dt .total-row .stick1,
+.dt .total-row td.stick1,
+.dt tfoot .stick1{
+  position:sticky;left:0;bottom:0;
+  z-index:8;
+  background:#E8ECF3;
+}
 .dt td.act-cell{color:var(--ink2);background:#F7F8F4}
 .dt td.dim{color:var(--mute)}
+/* —— 鞘填写页「筛选概览」(方案A2:产品上下排 + 点签约/未签约行内展开分布) —— */
+.ov-metseg{display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden;margin-left:auto}
+.ov-metseg button{border:none;background:#fff;padding:4px 12px;font-size:12px;color:var(--ink2);border-right:1px solid var(--line)}
+.ov-metseg button:last-child{border-right:none}
+.ov-metseg button.on{background:var(--ink);color:#fff;font-weight:600}
+.ov-metseg button:disabled{opacity:.4;cursor:not-allowed}
+.ov-prod{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 14px 14px}
+.ov-pbar{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:2px solid var(--line)}
+.ov-pt{font-size:19px;font-weight:800;letter-spacing:.02em}
+.ov-prod.zsr .ov-pbar{background:linear-gradient(90deg,var(--blue-soft),#fff)}
+.ov-prod.zsr .ov-pt{color:var(--blue)}
+.ov-prod.anrei .ov-pbar{background:linear-gradient(90deg,var(--green-soft),#fff)}
+.ov-prod.anrei .ov-pt{color:var(--green)}
+.ov-pbar .hint{font-size:11px;color:var(--mute);margin-left:auto;font-weight:400}
+table.ovt{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px;white-space:nowrap}
+.ovt thead th{background:#EBEEF5;color:var(--ink2);font-weight:700;font-size:10.5px;padding:8px 10px;border-bottom:2px solid var(--line2);text-align:right}
+.ovt thead th.l{text-align:left}
+.ovt td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;background:#fff}
+.ovt td.l{text-align:left}
+.ovt tr.ovtop>td{font-weight:800;color:var(--ink);background:#E8ECF3}
+.ovt tr.ovhdr>td{font-weight:700;color:var(--ink);background:#EFF3F9}
+.ovt tr.ovexp>td{font-weight:600;color:var(--ink2);background:#fff;cursor:pointer}
+.ovt tr.ovexp.open>td{background:#EEF3FC;color:var(--ink)}
+.ovt tr.ovexp:hover>td{background:#E9EEF6}
+.ov-car{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:6px;border-radius:5px;background:#fff;border:1px solid var(--line2);color:var(--ink2);font-size:9px;transition:transform .15s;vertical-align:middle}
+.ovexp.open .ov-car{transform:rotate(90deg)}
+.ov-ach.good{color:var(--green);font-weight:700}
+.ov-ach.mid{color:var(--amber);font-weight:700}
+.ov-ach.low{color:var(--red);font-weight:700}
+.ov-dim{color:var(--mute)}
+tr.ovdet>td{padding:0;background:#FBFCFE;border-bottom:1px solid var(--line)}
+.ovdw{display:flex;gap:0;padding:8px 0}
+.ovh{flex:1 1 50%;min-width:0;padding:6px 16px}
+.ovh+.ovh{border-left:1px dashed var(--line2)}
+.ovh-empty{display:flex;align-items:center;justify-content:center;color:#C0C8D4;font-size:11.5px}
+.ovh-t{font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.ovh-t .tg{font-size:10px;font-weight:600;color:var(--mute);background:#EEF1F6;border-radius:99px;padding:1px 8px}
+.ovmt{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.ovmt thead th{font-size:10px;color:var(--mute);font-weight:600;padding:2px 6px 5px;border-bottom:1px solid #E6E9EF;text-align:right;background:none}
+.ovmt thead th.l{text-align:left}
+.ovmt td{padding:4px 6px;border-bottom:1px solid #EEF1F6;text-align:right}
+.ovmt td.l{text-align:left;color:var(--ink2);white-space:nowrap}
+.ovmt td.n{width:64px;font-family:var(--num)}
+.ovmt td.u{width:64px;color:var(--mute);font-family:var(--num)}
+.ovmt td.p{width:140px;padding-left:12px}
+.ovmt tr.z td{color:#AAB3C0}
+.ovpc{display:flex;align-items:center;gap:8px}
+.ovbar{flex:1;height:8px;border-radius:4px;background:#EEF1F6;overflow:hidden}
+.ovbar>i{display:block;height:100%;border-radius:4px}
+.ov-prod.zsr .ovbar>i{background:linear-gradient(90deg,#6E93D6,#2054E0)}
+.ov-prod.anrei .ovbar>i{background:linear-gradient(90deg,#5BBF93,#0D7F56)}
+.ovpn{width:40px;text-align:right;font-family:var(--num);font-size:11.5px;color:var(--ink2)}
 /* 提报进度: 各经理(DSM)表格统一列宽 —— 固定布局 + 统一 colgroup, 与内容无关 */
 table.dt.prog-tbl{table-layout:fixed;min-width:700px}
 .dt.prog-tbl col.c-rep{width:180px}
@@ -4947,7 +5010,7 @@ function renderAdmin() {
     h += '</div>';
     h += '<div class="hint" style="margin-top:10px;line-height:1.7">开启后:启用 Supabase 在线实时同步、显示顶部「云端同步」按钮与下方「Supabase 云端配置」,团队打开链接即可在线填写、数据实时入库。<br>关闭后:全程仅用本机存储 + 公司共享盘文件接力,所有在线入口隐藏。<b>默认关闭。</b>切换后会刷新页面以重新连接/断开。</div>';
     h += '<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:12px"><label style="font-size:12.5px;display:inline-flex;align-items:flex-start;gap:6px"><input type="checkbox" id="auto-refresh-toggle" style="margin-top:2px"' + (autoRefreshOn() ? ' checked' : '') + '><span>看板 / 报表 / 提报进度页<b>自动刷新</b>(约 25 秒探测一次,检测到代表新提交即自动更新整页;填写页与后台不受影响)。<b>默认开启。</b></span></label></div>';
-    h += '<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:12px"><button class="btn pri sm" id="cloud-detect-btn">🔍 一键检测云端连接 + 统计数据</button><span class="hint" style="margin-left:8px">检测主预估(fc_data)与鞘模块(zsr_data)是否已连云、各存了多少条</span><div id="cloud-detect-result" style="margin-top:10px;font-size:13px;line-height:1.85"></div></div>';
+    h += '<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:12px"><button class="btn pri sm" id="cloud-detect-btn">🔍 一键检测云端连接 + 统计数据</button><span class="hint" style="margin-left:8px">检测主预估与鞘模块(共用 fc_data 表)是否已连云、各存了多少条</span><div id="cloud-detect-result" style="margin-top:10px;font-size:13px;line-height:1.85"></div></div>';
     h += '</div></div>';
   }
   /* ⑦ Supabase 云端配置（在线提交）—— 仅在 ONLINE_ENABLED 时显示 */
@@ -5174,7 +5237,7 @@ async function probeCloudTable(label, sb, table, fillPrefix, fillLabel){
   } catch(e){ return '<div style="margin:6px 0">'+label+': <span style="color:var(--red)">✗ 检测异常 — '+esc(e && e.message || "")+'</span></div>'; }
 }
 function formatZsrProbe(z){
-  const label = "🩺 鞘模块(zsr_data)";
+  const label = "🩺 鞘模块(fc_data · zsr- 键)";
   if (!z || z.notReady) return '<div style="margin:6px 0">'+label+': <span style="color:var(--mute)">○ 鞘模块尚未加载完成,请稍候再点检测</span></div>';
   if (z.error) return '<div style="margin:6px 0">'+label+': <span style="color:var(--red)">✗ '+esc(z.error)+'</span></div>';
   if (!z.enabled) return '<div style="margin:6px 0">'+label+': <span style="color:var(--mute)">○ 未连接(当前为离线 / 本机模式)</span></div>';
@@ -5960,6 +6023,10 @@ const EQUIP_OPTS = [
   { v: "2. 代理商轮转", label: "2. 代理商轮转" },
   { v: "3. 暂无设备", label: "3. 暂无设备" }
 ];
+/* 设备布局状态(新列,在「耗材入院进度」之后):四选一下拉 */
+const LAYOUT_OPTS = ["1. 医院购买", "2. 代理商提供样机", "3. 波科提供样机", "4. 无设备单耗材销售"];
+const isAnreiProd = p => /anrei|安瑞/i.test(p || "");   // 安瑞鞘产品判定(ZSR设备计划对其不适用)
+const isZsrProd   = p => /zsr/i.test(p || "");          // ZSR鞘产品判定
 // 看板阶段配色 (未签约阶段)
 const STAGE_COLORS = { 1:"#C8D4EA", 2:"#9FB8E0", 3:"#6E93D6", 4:"#3F6FCC", 5:"#0D7F56", 6:"#9E6200", up:"#0D7F56", noup:"#C8CFDB", none:"#EEF1F6" };
 
@@ -5971,10 +6038,13 @@ function progPct(signed, v){ if (signed || !v) return null; const s = stepInfo(f
 function isEntered(signed, v){ return signed ? v >= 3 : v >= 5; }
 
 /* =================== 存储适配层 =================== */
-/* ★ Supabase 在线配置: 与预估收集工具同一项目,使用独立的表 zsr_data */
+/* ★ Supabase 在线配置: 与预估收集工具同一项目、同一张表 fc_data。
+   鞘模块所有键都以 "zsr-" 前缀命名(zsr-base / zsr-fill / zsr-fc-base …),与主模块的 "fc-" 键天然隔离、绝不冲突,
+   因此复用主模块已验证可用的 fc_data 表即可,无需在 Supabase 另建 zsr_data 表(那是之前"鞘数据换设备/刷新就丢"的根因:
+   zsr_data 表不存在或无写权限时,鞘的云端写入会静默失败,数据只落在本机缓存)。 */
 const SUPABASE_URL = "https://hhhzeeijhpivdpzrzcpt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_id8zrD4b8wLQ6ujAGOmROQ_E0qG1tlb";
-const SB_TABLE = "zsr_data";
+const SB_TABLE = "fc_data";
 
 const Store = {
   shared:false, mem:{}, ls:null, sb:null, sbEnabled:false,
@@ -5984,6 +6054,9 @@ const Store = {
     /* ★ Supabase 在线存储初始化(仅在 ONLINE_ENABLED 时启用;否则全程本机存储) */
     if (window.ONLINE_ENABLED && !this.shared && typeof window.supabase !== "undefined"){
       let url = SUPABASE_URL, key = SUPABASE_KEY;
+      /* 先读主模块(预估收集)的云端配置 fc-supabase-config,确保鞘与主始终连同一个 Supabase 项目;
+         再让鞘专属配置 zsr-supabase-config 覆盖(若有)。避免管理员只在主后台改了项目、鞘还连旧项目导致数据"看不见"。 */
+      try { const cm = this.ls ? JSON.parse(this.ls.getItem("fc-supabase-config")||"{}") : {}; if(cm.url) url=cm.url; if(cm.key) key=cm.key; } catch(e){}
       try { const c = this.ls ? JSON.parse(this.ls.getItem("zsr-supabase-config")||"{}") : {}; if(c.url) url=c.url; if(c.key) key=c.key; } catch(e){}
       if (url && key){ try { this.sb = window.supabase.createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, storageKey: "zsr-sb-auth" } }); this.sbEnabled = true; } catch(e){ console.error("Supabase init failed:", e); this.sbEnabled=false; } }
     }
@@ -6059,7 +6132,7 @@ function computeFillDirty(online, draft){
   if (!draft) return false;
   for (const k of Object.keys(draft)){
     const d = draft[k], o = online && online[k];
-    if (!o){ if (d && (d.step || d.equip || d.blocker || d.note)) return true; continue; }
+    if (!o){ if (d && (d.step || d.equip || d.layout || d.blocker || d.note)) return true; continue; }
     if ((d.updatedAt||0) > (o.updatedAt||0)) return true;
   }
   return false;
@@ -6097,7 +6170,7 @@ const S = {
   fcReport:{ dim:"rep", metric:"amt", sort:null },
   zDrill:{ region:[], manager:[], rep:[], province:[], product:[], status:[] },  // ★ 四界面共享的多选下钻条件(含 是否签约)
   _colW:{},
-  fillColVis:{ region:false, manager:true, rep:false, province:false, hosp:true, product:true, status:true, cv:false, fv:false, step:true, pct:true, cmp:true, equip:true, blocker:true, note:true }
+  fillColVis:{ region:false, manager:true, rep:false, province:false, hosp:true, product:true, status:true, cv:false, fv:false, step:true, layout:true, pct:true, cmp:true, equip:true, note:true }
 };
 
 const rowKey = r => r.hospCode + "|" + r.product;
@@ -6224,14 +6297,17 @@ async function loadAll(local){
     if (!Store.sbEnabled){ await saveBase(); await saveFill(); await saveVersions(); }
   }
 }
-async function saveBase(){ await Store.set("zsr-base", { rows:S.base, meta:S.baseMeta }); }
+/* 云端写入失败时显式告警:数据已存本机,但未同步云端(换设备/清缓存会丢)。
+   之前这类失败是静默的(导入仍提示"成功"),让人误以为已上云。 */
+function warnIfCloudFailed(ok){ if (!ok && Store.sbEnabled) toast("⚠ 云端保存失败:数据已存本机,但未同步到云端(换设备/清缓存可能丢失)。请管理员检查云端表 fc_data 的写入权限。"); }
+async function saveBase(){ const ok = await Store.set("zsr-base", { rows:S.base, meta:S.baseMeta }); warnIfCloudFailed(ok); return ok; }
 async function saveFill(){ await Store.set("zsr-fill", S.fill); }       /* 在线/共享写入(管理员导入、提交时用) */
 function saveFillDraft(){ Store.draftSet("zsr-fill", S.fill); }          /* 填写编辑暂存到本机草稿 */
 async function saveVersions(){ await Store.set("zsr-versions", S.versions); }
 async function savePasswords(){ await Store.set("zsr-passwords", S.passwords); }
 
 /* ===== 鞘预估子系统:存储助手 ===== */
-async function saveFcBase(){ await Store.set("zsr-fc-base", { rows:S.fcBase, meta:S.fcMeta, cfg:S.fcCfg }); }
+async function saveFcBase(){ const ok = await Store.set("zsr-fc-base", { rows:S.fcBase, meta:S.fcMeta, cfg:S.fcCfg }); warnIfCloudFailed(ok); return ok; }
 async function saveFcFill(){ await Store.set("zsr-fc-fill", S.fcFill); }
 function saveFcDraft(){ Store.draftSet("zsr-fc-fill", S.fcFill); S.fcFillDirty = true; _zFcSeq++; }
 /* 打开公司共享盘文件夹(鞘入院进度上传留档) */
@@ -6251,7 +6327,7 @@ function buildRows(){
     const step = f.step || 0;
     return {
       ...r, key:k,
-      step, equip:f.equip || "", blocker:f.blocker || "", note:f.note || "",
+      step, equip:f.equip || "", layout:f.layout || "", blocker:f.blocker || "", note:f.note || "",
       updatedBy:f.updatedBy || "", updatedAt:f.updatedAt || 0,
       pct:progPct(r.contracted, step),
       entered:isEntered(r.contracted, step)
@@ -6424,60 +6500,151 @@ function renderWatermark(){
 function distinct(arr, f){ return [...new Set(arr.map(f).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"zh")); }
 
 /* 过滤后的入院进度行(与下方表格同口径),供 KPI 概览与表格共用 */
+/* 有无 AOP 指标:以「年化签约量 + 年化自由量 > 0」判定(用户口径) */
+function hasAopVol(r){ return ((+r.contractVol||0) + (+r.freeVol||0)) > 0; }
 function filteredStepRows(all){
   const base = all || scopedRows();
   let rows = zApplyDrill(base);   // ★ 共享下钻筛选(含 是否签约,四界面联动)
   const q = ((S.fFilter && S.fFilter.q) || "").trim().toLowerCase();
   if (q) rows = rows.filter(r => (r.hospName+r.hospCode+r.rep+r.manager+r.province+r.product).toLowerCase().includes(q));
+  const aopF = (S.fFilter && S.fFilter.aop) || "all";   // all / yes(有AOP) / no(无AOP)
+  if (aopF === "yes") rows = rows.filter(hasAopVol);
+  else if (aopF === "no") rows = rows.filter(r => !hasAopVol(r));
   return rows;
 }
-/* 入院进度 KPI 概览盒(随筛选 + 填写实时联动)。各项「家数」均按医院 code 去重:
-   同一家医院若有多个产品行处于不同阶段,会在各自阶段分别计入一次。 */
-function stepKpiBoxHtml(rows){
-  const hcount = pred => { const s = new Set(); for (const r of rows) if (pred(r)) s.add(r.hospCode); return s.size; };
-  const isZSR   = p => /zsr/i.test(p||"");
-  const isAnrei = p => /anrei|安瑞/i.test(p||"");
-  const hospN = new Set(rows.map(r=>r.hospCode)).size;
-  const zsrSigned   = hcount(r => r.contracted && isZSR(r.product));
-  const anreiSigned = hcount(r => r.contracted && isAnrei(r.product));
-  /* 耗材入院进度(按产品线拆分):意向=未签约step1 · 已试用=step2 · 已提单=未签约step3 · 已过会=未签约step4 · 已入院=未签约step5或签约step3 */
-  const stageCounts = prod => ({
-    intent: hcount(r => prod(r.product) && !r.contracted && r.step===1),
-    trial:  hcount(r => prod(r.product) && r.step===2),
-    order:  hcount(r => prod(r.product) && !r.contracted && r.step===3),
-    meet:   hcount(r => prod(r.product) && !r.contracted && r.step===4),
-    inh:    hcount(r => prod(r.product) && ((!r.contracted && r.step===5) || (r.contracted && r.step===3)))
-  });
-  const zStage = stageCounts(isZSR), aStage = stageCounts(isAnrei);
-  /* ZSR设备计划:按 equip 文案关键词匹配(1.0已计划 / 1.1已提单 / 1.2已招标 / 1.3已入院) */
-  const eqPlan  = hcount(r => /已计划/.test(r.equip||""));
-  const eqOrder = hcount(r => /已提单/.test(r.equip||""));
-  const eqBid   = hcount(r => /已招标/.test(r.equip||""));
-  const eqIn    = hcount(r => /已入院/.test(r.equip||""));
-  /* 年化量合计(按产品线拆分) */
-  let cvZSR=0, fvZSR=0, cvAnrei=0, fvAnrei=0;
-  for (const r of rows){
-    if (isZSR(r.product)){ cvZSR += (+r.contractVol||0); fvZSR += (+r.freeVol||0); }
-    else if (isAnrei(r.product)){ cvAnrei += (+r.contractVol||0); fvAnrei += (+r.freeVol||0); }
+/* ========== 鞘填写页「筛选概览」(方案A2) ==========
+   两个产品上下排(上 ZSR测压鞘 / 下 Anrei鞘);每块一张汇总表,点「签约医院/未签约医院」行内展开分布。
+   汇总列:医院数 · 上一次填写医院数 · 指标 · 预估 · 达成率 · 上一次预估数(指标/预估/上一次预估随金额↔数量切换,默认数量)。
+   展开分布:左「按耗材入院进展」、右「按设备布局状态」(安瑞鞘无布局,右侧留空);明细列=本次填写医院数·上个版本医院数·占比(条+%)。
+   「上一次/上个版本」取最近一个已保存版本(快照已附 step/layout/预估FY/预估件数);无版本显示 –。 */
+let _ovOpen = new Set();   // 展开的 签约/未签约 行(内存,默认收起)
+let _ovBound = false;
+const OV_SIDES = [
+  { k:"zsr",   title:"ZSR测压鞘", cls:"zsr",   pred:r=>isZsrProd(r.product),  hasLayout:true },
+  { k:"anrei", title:"Anrei鞘",   cls:"anrei", pred:r=>isAnreiProd(r.product), hasLayout:false }
+];
+function ovMetric(){ try { return localStorage.getItem("zsr-ov-metric")==="amt"?"amt":"qty"; } catch(e){ return "qty"; } }
+function setOvMetric(m){ try { localStorage.setItem("zsr-ov-metric", m==="amt"?"amt":"qty"); } catch(e){} }
+function stepOverviewHtml(rows){
+  const hasQty = !!(S.fcCfg && S.fcCfg.hasQty);
+  let metric = ovMetric(); if (metric==="qty" && !hasQty) metric = "amt";
+  const isQty = metric==="qty";
+  const unit = isQty ? "件" : "千元K";
+  // 预估/指标:按口径(数量 q / 金额 a)取值
+  const fcMap={}, aopMap={};
+  for (const e of fcBuildEntries()){
+    let fc=0, aop=0;
+    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); aop += isQty?(e.aopQ[i]||0):(e.aopA[i]||0); }
+    fcMap[e.key]=fc; aopMap[e.key]=aop;
   }
-  const b = v => '<b style="color:var(--ink)">'+v+'</b>';   // 数字加粗,字号与正文一致
-  const stageLine = (label, st) => '<div><b style="color:var(--ink)">'+label+'　</b>意向 '+b(st.intent)+' · 已试用 '+b(st.trial)+' · 已提单 '+b(st.order)+' · 已过会 '+b(st.meet)+' · 已入院 '+b(st.inh)+'(家)</div>';
-  const volLine = (label, cv, fv) => '<div><b style="color:var(--ink)">'+label+'　</b>年化签约量 '+b(fmtN(cv))+' · 年化自由量 '+b(fmtN(fv))+'</div>';
-  let h = '<div class="card" id="step-kpi-box"><div class="card-h"><b>📊 筛选概览</b><span class="hint">随筛选与填写实时联动 · 家数按医院去重</span></div>';
-  h += '<div class="card-b" style="font-size:14px;line-height:2;color:var(--ink2)">';
-  h += '<div><b style="color:var(--ink)">医院　</b>筛选 '+b(hospN)+' 家(去重) · ZSR鞘签约 '+b(zsrSigned)+' 家 · 安瑞鞘签约 '+b(anreiSigned)+' 家</div>';
-  h += stageLine("耗材入院进度·ZSR鞘", zStage);
-  h += stageLine("耗材入院进度·安瑞鞘", aStage);
-  h += '<div><b style="color:var(--ink)">ZSR设备计划　</b>已计划 '+b(eqPlan)+' · 已提单 '+b(eqOrder)+' · 已招标 '+b(eqBid)+' · 已入院 '+b(eqIn)+'(家)</div>';
-  h += volLine("年化量合计·ZSR鞘", cvZSR, fvZSR);
-  h += volLine("年化量合计·安瑞鞘", cvAnrei, fvAnrei);
-  h += '</div></div>';
-  return h;
+  const ver = latestVersion();
+  const pd = ver && ver.data ? ver.data : null;
+  const pStep = k => (pd&&pd[k]) ? (pd[k].step||0) : 0;
+  const pLayout = k => (pd&&pd[k]) ? (pd[k].layout||"") : "";
+  const pFc = k => (pd&&pd[k]) ? (isQty ? (pd[k].fyq||0) : (pd[k].fy||0)) : 0;
+
+  // 汇总行(含金额/数量列)
+  const calcSum = (ents, pred, ppred) => {
+    const cur = ents.filter(pred);
+    const hosp = new Set(cur.map(r=>r.hospCode)).size;
+    let aop=0, fc=0, cv=0, fv=0; for (const r of cur){ aop += aopMap[r.key]||0; fc += fcMap[r.key]||0; cv += (+r.contractVol||0); fv += (+r.freeVol||0); }
+    let ph=null, pf=null;
+    if (pd){ const pr=ents.filter(ppred); ph=new Set(pr.map(r=>r.hospCode)).size; pf=0; for (const r of pr) pf += pFc(r.key); }
+    return { hosp, cv, fv, aop, fc, ach: aop>0?fc/aop:null, ph, pf };
+  };
+  // 分布行(仅家数)
+  const cnt = (ents, pred, ppred) => {
+    const hosp = new Set(ents.filter(pred).map(r=>r.hospCode)).size;
+    const ph = pd ? new Set(ents.filter(ppred).map(r=>r.hospCode)).size : null;
+    return { hosp, ph };
+  };
+  const SIGN_STEPS=[["未填写",s=>s===0],["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
+  const UNSIGN_STEPS=[["未填写",0],["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
+  const LAY=["",...LAYOUT_OPTS]; const layLabel=v=>v||"未填写";
+  const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
+  const N=v=>fmtN(v), D=v=>'<span class="ov-dim">'+(v==null?"–":fmtN(v))+'</span>';
+
+  // 分布小表:gr = 该展开组(已按 有/无AOP + 签约/未签约 过滤好)的行;按 step/layout 分桶,家数去重
+  function miniTable(gr, signed, byLayout){
+    const total = new Set(gr.map(r=>r.hospCode)).size;
+    const cntIn = (curM, priM) => ({ hosp: new Set(gr.filter(curM).map(r=>r.hospCode)).size, ph: pd ? new Set(gr.filter(priM).map(r=>r.hospCode)).size : null });
+    let h='<table class="ovmt"><thead><tr><th class="l">类别</th><th>本次填写医院数</th><th>上个版本医院数</th><th class="l" style="padding-left:12px">占比</th></tr></thead><tbody>';
+    const mkRow=(lab,c)=>{ const pct=total>0?c.hosp/total:0;
+      return '<tr'+(c.hosp?'':' class="z"')+'><td class="l">'+esc(lab)+'</td><td class="n">'+c.hosp+'</td><td class="u">'+(c.ph==null?'–':c.ph)+'</td>'+
+        '<td class="p"><div class="ovpc"><div class="ovbar"><i style="width:'+(pct*100).toFixed(0)+'%"></i></div><span class="ovpn">'+(pct*100).toFixed(0)+'%</span></div></td></tr>'; };
+    if (byLayout){
+      for (const opt of LAY) h+=mkRow(layLabel(opt), cntIn(r=>(r.layout||"")===opt, r=>(pLayout(r.key)||"")===opt));
+    } else {
+      for (const item of (signed?SIGN_STEPS:UNSIGN_STEPS)){
+        const lab=item[0], pf=signed?item[1]:(s=>s===item[1]);
+        h+=mkRow(lab, cntIn(r=>pf(r.step), r=>pf(pStep(r.key))));
+      }
+    }
+    return h+'</tbody></table>';
+  }
+  function prodBlock(side){
+    const ents = rows.filter(side.pred);
+    const sumRow = (label, c, o={}) => {
+      const expId=o.expId, open=expId&&_ovOpen.has(expId);
+      const car=expId?'<span class="ov-car">▸</span>':'';
+      const cls=[expId?('ovexp'+(open?' open':'')):'', o.cls||''].filter(Boolean).join(' ');
+      const pad=o.indent?' style="padding-left:24px"':'';
+      return '<tr'+(cls?' class="'+cls+'"':'')+(expId?' data-ovexp="'+expId+'"':'')+'>'+
+        '<td class="l"'+pad+'>'+car+esc(label)+'</td>'+
+        '<td class="num">'+N(c.hosp)+'</td>'+
+        '<td class="num">'+N(c.cv)+'</td><td class="num">'+N(c.fv)+'</td>'+
+        '<td class="num">'+D(c.ph)+'</td>'+
+        '<td class="num">'+N(c.aop)+'</td><td class="num"><b>'+N(c.fc)+'</b></td>'+
+        '<td class="num ov-ach '+achCls(c.ach)+'">'+(c.ach==null?'–':(c.ach*100).toFixed(1)+'%')+'</td>'+
+        '<td class="num">'+D(c.pf)+'</td></tr>';
+    };
+    // 展开分布行:groupPred 已含 有/无AOP + 签约/未签约 条件
+    const detail = (groupPred, signed) => {
+      const gr = ents.filter(groupPred);
+      const n = new Set(gr.map(r=>r.hospCode)).size;
+      let inner='<div class="ovdw"><div class="ovh"><div class="ovh-t">按耗材入院进展 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, false)+'</div>';
+      inner += side.hasLayout ? ('<div class="ovh"><div class="ovh-t">按设备布局状态 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, true)+'</div>') : '<div class="ovh ovh-empty">安瑞鞘无设备布局状态</div>';
+      inner += '</div>';
+      return '<tr class="ovdet"><td colspan="9">'+inner+'</td></tr>';
+    };
+    // 一个 AOP 分组(有/无)下的:小计行 + 签约/未签约(可展开)
+    const aopGroup = (label, hasPred, kpfx) => {
+      let g = sumRow(label, calcSum(ents, r=>hasPred(r), r=>hasPred(r)), {cls:"ovhdr"});
+      const sId=side.k+":"+kpfx+"-sign", uId=side.k+":"+kpfx+"-unsign";
+      const signPred=r=>hasPred(r)&&r.contracted, unPred=r=>hasPred(r)&&!r.contracted;
+      g += sumRow(label.replace("医院","")+"的签约医院", calcSum(ents, signPred, signPred), {expId:sId, indent:true});
+      if (_ovOpen.has(sId)) g += detail(signPred, true);
+      g += sumRow(label.replace("医院","")+"的未签约医院", calcSum(ents, unPred, unPred), {expId:uId, indent:true});
+      if (_ovOpen.has(uId)) g += detail(unPred, false);
+      return g;
+    };
+    let h = '<div class="ov-prod '+side.cls+'"><div class="ov-pbar"><span class="ov-pt">'+esc(side.title)+'</span><span class="hint">单位:'+unit+'</span></div>';
+    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>上一次填写医院数</th><th>指标</th><th>预估</th><th>达成率</th><th>上一次预估数</th></tr></thead><tbody>';
+    h += sumRow("区域内总医院", calcSum(ents, ()=>true, ()=>true), {cls:"ovtop"});
+    h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
+    h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
+    return h + '</tbody></table></div>';
+  }
+  let h = '<div class="card" id="step-kpi-box"><div class="card-h"><b>📊 筛选概览</b><span class="hint">'+
+    (pd?'随筛选与填写实时联动 · 「上一次」对比最近版本':'随筛选与填写实时联动 · 暂无历史版本(保存版本后「上一次」两列才有值)')+'</span>'+
+    '<span class="ov-metseg"><button data-ovmetric="qty" class="'+(isQty?'on':'')+'"'+(hasQty?'':' disabled title="无数量数据"')+'>数量</button><button data-ovmetric="amt" class="'+(!isQty?'on':'')+'">金额K</button></span></div>';
+  h += OV_SIDES.map(prodBlock).join("");
+  return h + '</div>';
 }
-/* 仅刷新 KPI 概览盒(不重渲染整表),供填写单元格即时变更后实时联动 */
+/* 概览交互绑定(委托到 document,只绑一次):点签约/未签约行展开分布、金额↔数量切换 */
+function bindStepOverview(){
+  if (_ovBound) return; _ovBound = true;
+  document.addEventListener("click", e => {
+    const ex = e.target.closest('[data-ovexp]');
+    if (ex){ const id=ex.getAttribute('data-ovexp'); _ovOpen.has(id)?_ovOpen.delete(id):_ovOpen.add(id); refreshStepKpi(); return; }
+    const mt = e.target.closest('[data-ovmetric]');
+    if (mt && !mt.disabled){ setOvMetric(mt.getAttribute('data-ovmetric')); refreshStepKpi(); }
+  });
+}
+/* 仅刷新概览盒(不重渲染整表),供填写单元格即时变更后实时联动 */
 function refreshStepKpi(){
   const el = $("#step-kpi-box");
-  if (el) el.outerHTML = stepKpiBoxHtml(filteredStepRows());
+  if (el) el.outerHTML = stepOverviewHtml(filteredStepRows());
 }
 
 function renderFill(){
@@ -6502,8 +6669,8 @@ function renderFill(){
     rows = rows.slice().sort((a,b)=>{ const x=sv(a),y=sv(b); if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; if(typeof x==="string"||typeof y==="string")return String(x).localeCompare(String(y),"zh")*dir; return (x-y)*dir; });
   }
 
-  // 📊 筛选概览 KPI(置于最上方,随筛选 + 填写实时联动)
-  let h = stepKpiBoxHtml(rows);
+  // 📊 筛选概览 双表(置于最上方,随筛选 + 填写实时联动)
+  let h = stepOverviewHtml(rows);
 
   h += '<div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px">'+viewSegHtml("step","fill")+'<b style="margin-left:6px">填写跟进 · 入院进度</b><span class="hint">切到「月度预估」可一键收缩入院字段、改填 by 月份预估</span>' +
     (editable ? '' : '<span class="tag" style="margin-left:6px;background:var(--amber-soft);color:var(--amber)">只读</span>') +
@@ -6518,16 +6685,16 @@ function renderFill(){
     { id:"manager",  label:"经理",   cls:"l", w:80,  sv:r=>r.manager,  td:r=>'<td class="l dim">'+esc(r.manager)+'</td>' },
     { id:"rep",      label:"代表",   cls:"l", w:88,  sv:r=>r.rep,      td:r=>'<td class="l">'+esc(r.rep)+'</td>' },
     { id:"province", label:"省份",   cls:"l", w:70,  sv:r=>r.province, td:r=>'<td class="l dim">'+esc(r.province)+'</td>' },
-    { id:"hosp",     label:"医院名称",cls:"l stick1", w:152, sv:r=>r.hospName, td:r=>'<td class="l stick1" title="'+esc(r.hospName)+'">'+esc(r.hospName)+'<span class="subc" style="color:var(--mute);font-size:10px"> · '+esc(r.hospCode)+'</span>'+(FCFY?xhFcChip(FCFY[rowKey(r)]!=null?FCFY[rowKey(r)]:null):'')+'</td>' },
+    { id:"hosp",     label:"医院名称",cls:"l stick1", w:150, sv:r=>r.hospName, td:r=>'<td class="l stick1" title="'+esc(r.hospName)+(r.hospCode?(' · '+esc(r.hospCode)):'')+'"><div style="width:134px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.hospName)+'<span class="subc" style="color:var(--mute);font-size:10px"> · '+esc(r.hospCode)+'</span>'+(FCFY?xhFcChip(FCFY[rowKey(r)]!=null?FCFY[rowKey(r)]:null):'')+'</div></td>' },
     { id:"product",  label:"产品",   cls:"l", w:120, sv:r=>r.product,  td:r=>'<td class="l">'+esc(r.product)+'</td>' },
     { id:"status",   label:"签约",   cls:"c", w:62,  sv:r=>r.contracted?1:0, td:r=>'<td class="c"><span class="tag '+(r.contracted?"signed":"unsigned")+'">'+(r.contracted?"签约":"未签约")+'</span></td>' },
     { id:"cv",       label:"年化签约量",cls:"", w:84, sv:r=>r.contractVol, td:r=>'<td class="num dim">'+fmtN(r.contractVol)+'</td>' },
     { id:"fv",       label:"年化自由量",cls:"", w:84, sv:r=>r.freeVol,     td:r=>'<td class="num dim">'+fmtN(r.freeVol)+'</td>' },
     { id:"step",     label:"耗材入院进度(选择)",cls:"l", w:158, sv:r=>r.step, td:r=>stepCellTd(r, editable) },
+    { id:"layout",   label:"设备布局状态",cls:"l", w:152, sv:r=>r.layout, td:r=>layoutCellTd(r, editable) },
     { id:"pct",      label:"入院进度",cls:"l", w:150, sv:r=>(r.pct!=null?r.pct:(r.step===6?1.01:(r.contracted?(r.step/3):-1))), td:r=>progCellTd(r) },
     { id:"cmp",      label:"对比上版",cls:"c", w:84,  sv:r=>{const c=compareTag(r);return c.kind==="adv"?2:c.kind==="keep"?1:c.kind==="back"?0:-1;}, td:r=>cmpCellTd(r) },
-    { id:"equip",    label:"ZSR设备计划",cls:"l", w:150, sv:r=>r.equip, td:r=>equipCellTd(r, editable) },
-    { id:"blocker",  label:"目前业务卡点",cls:"l", w:190, sv:r=>r.blocker, td:r=>'<td class="l"><input class="cell-in" '+(editable?"":"disabled")+' data-fld="blocker" data-k="'+esc(r.key)+'" value="'+esc(r.blocker)+'" placeholder="卡点…"></td>' },
+    { id:"equip",    label:"ZSR设备计划(选填)",cls:"l", w:150, sv:r=>r.equip, td:r=>equipCellTd(r, editable) },
     { id:"note",     label:"管理者备注",   cls:"l", w:180, sv:r=>r.note, td:r=>'<td class="l"><input class="cell-in" '+(editable?"":"disabled")+' data-fld="note" data-k="'+esc(r.key)+'" value="'+esc(r.note)+'" placeholder="管理者备注…"></td>' }
   ];
   const cols = allCols.filter(c => S.fillColVis[c.id] !== false);
@@ -6537,11 +6704,15 @@ function renderFill(){
 
   // 工具条:搜索 + 显示字段
   const colToggleLabel = (id) => {
-    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', step:'耗材入院进度(选择)', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划', blocker:'目前业务卡点', note:'管理者备注' };
+    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
     return map[id] || id;
   };
   h += '<div class="toolbar">';
   h += '<div style="flex:1 1 220px;min-width:200px"><div class="lbl">搜索</div><input class="ctrl" id="f-q" placeholder="医院 / code / 代表…" value="'+esc((ff&&ff.q)||"")+'" style="width:100%"></div>';
+  // AOP 指标筛选(年化签约量+自由量>0 视为有AOP)
+  const aopCur = (ff && ff.aop) || "all";
+  h += '<div><div class="lbl">AOP 指标</div><div class="seg" id="f-aop" title="年化签约量 + 年化自由量 > 0 视为「有AOP」">' +
+    [["all","全部"],["yes","有AOP"],["no","无AOP"]].map(([v,l])=>'<button data-a="'+v+'" class="'+(aopCur===v?"on":"")+'">'+l+'</button>').join("") + '</div></div>';
   h += '<div class="ms-wrap" id="f-colvis" style="margin-left:auto"><div class="ms-trigger"><span class="ms-trigger-txt">☰ 显示字段</span></div><div class="ms-panel">';
   for (const c of allCols) h += '<label><input type="checkbox" data-cvid="'+c.id+'"'+(S.fillColVis[c.id]!==false?' checked':'')+'> '+colToggleLabel(c.id)+'</label>';
   h += '</div></div>';
@@ -6584,6 +6755,7 @@ function renderFill(){
   }
 
   bindFill(cols);
+  bindStepOverview();
 }
 /* —— 入院进度表行体渲染 ——
    注:此前的「虚拟滚动(只渲染可视行)」在本运行环境下导致表格无法正常显示,已回退为稳定可靠的全量渲染。
@@ -6618,6 +6790,8 @@ function progCellTd(r){
 }
 function cmpCellTd(r){ const c = compareTag(r); return '<td class="c"><span class="cmp '+c.kind+'">'+c.label+'</span></td>'; }
 function equipCellTd(r, editable){
+  /* ZSR设备计划为选填;安瑞鞘(Anrei)产品不涉及 ZSR 设备,默认不需填写、不可下拉 */
+  if (isAnreiProd(r.product)) return '<td class="l dim" style="color:var(--mute);text-align:center" title="安瑞鞘无需填写 ZSR 设备计划">—</td>';
   let s = '<td class="l"><select class="cell-sel'+(r.equip?" set":"")+'" '+(editable?"":"disabled")+' data-fld="equip" data-k="'+esc(r.key)+'">';
   const allKnownVals = [];
   for (const o of EQUIP_OPTS) {
@@ -6632,12 +6806,21 @@ function equipCellTd(r, editable){
   if (r.equip && !allKnownVals.includes(r.equip)) s += '<option selected>'+esc(r.equip)+'</option>';
   return s + '</select></td>';
 }
+/* 设备布局状态:四选一下拉(医院购买 / 代理商提供样机 / 波科提供样机 / 无设备单耗材销售) */
+function layoutCellTd(r, editable){
+  let s = '<td class="l"><select class="cell-sel'+(r.layout?" set":"")+'" '+(editable?"":"disabled")+' data-fld="layout" data-k="'+esc(r.key)+'"><option value="">未填写</option>';
+  const known = [];
+  for (const o of LAYOUT_OPTS){ s += '<option'+(r.layout===o?' selected':'')+'>'+esc(o)+'</option>'; known.push(o); }
+  if (r.layout && !known.includes(r.layout)) s += '<option selected>'+esc(r.layout)+'</option>';
+  return s + '</select></td>';
+}
 function sortValFill(r, id){
   const map = { region:r.region, manager:r.manager, rep:r.rep, province:r.province, hosp:r.hospName, product:r.product,
     status:r.contracted?1:0, cv:r.contractVol, fv:r.freeVol, step:r.step,
+    layout:r.layout,
     pct:(r.pct!=null?r.pct:(r.step===6?1.01:(r.contracted?(r.step/3):-1))),
     cmp:(()=>{const c=compareTag(r);return c.kind==="adv"?2:c.kind==="keep"?1:c.kind==="back"?0:-1;})(),
-    equip:r.equip, blocker:r.blocker, note:r.note };
+    equip:r.equip, note:r.note };
   return map[id];
 }
 
@@ -6671,6 +6854,8 @@ function bindFill(cols){
   bindFcViewSeg();
   bindZDrill(renderFill);   // ★ 共享下钻(含 是否签约,四界面联动)
   if ($("#f-q")) $("#f-q").oninput = debounce(e => { if(!S.fFilter) S.fFilter={}; S.fFilter.q = e.target.value.trim(); renderFill(); }, 250);
+  const aopSeg = $("#f-aop");
+  if (aopSeg) aopSeg.onclick = e => { const b=e.target.closest("button"); if(b&&b.dataset.a){ if(!S.fFilter)S.fFilter={}; S.fFilter.aop=b.dataset.a; renderFill(); } };
   if ($("#btn-submit-all")) $("#btn-submit-all").onclick = () => submitAll();
   if ($("#zbtn-save-step")) $("#zbtn-save-step").onclick = () => saveConfirmStep();
   // 列显示控制
@@ -7130,7 +7315,12 @@ function bindAdmin(){
   if ($("#a-paste-go")) $("#a-paste-go").onclick = () => importFromText($("#a-paste").value);
   if ($("#a-snap")) $("#a-snap").onclick = async () => {
     const label = ($("#a-snap-label").value || "").trim() || ("版本 " + new Date().toLocaleString("zh-CN"));
-    const data = {}; for (const k in S.fill){ const f=S.fill[k]; data[k] = { step:f.step||0, equip:f.equip||"", blocker:f.blocker||"", note:f.note||"" }; }
+    /* 快照覆盖全部底表行(不只已填写的),并附带当时的「预估FY」(金额K 与 数量件),
+       供「筛选概览」的「上一次填写医院数 / 上一次预估数」两列做同期对比(支持金额↔数量切换)。 */
+    const fcA={}, fcQ={};
+    for (const e of fcBuildEntries()){ let a=0,q=0; for (let i=0;i<12;i++){ a+=(e.m[i]&&e.m[i].a)||0; q+=(e.m[i]&&e.m[i].q)||0; } fcA[e.key]=a; fcQ[e.key]=q; }
+    const data = {};
+    for (const r of buildRows()){ const k = r.key, f = S.fill[k] || {}; data[k] = { step:f.step||0, equip:f.equip||"", layout:f.layout||"", note:f.note||"", fy: fcA[k]||0, fyq: fcQ[k]||0 }; }
     S.versions.push({ id:uid(), label, ts:Date.now(), data });
     await saveVersions(); toast("已保存版本:" + label); renderAdmin();
   };
@@ -7210,7 +7400,8 @@ function detectCols(headers){
     contractVol: find(inc("签约量")),
     freeVol: find(inc("自由量")),
     stepSel: find(h=>h.includes("入院进度")&&h.includes("下拉"), h=>h==="入院进度  下拉选择", h=>h.includes("入院进度")&&h.includes("选择")),
-    equip: find(inc("设备")),
+    layout: find(inc("设备布局"), inc("布局状态"), inc("布局")),
+    equip: find(h=>h.includes("设备")&&!h.includes("布局"), inc("ZSR设备"), inc("设备计划")),
     blocker: find(inc("卡点")),
     note: find(h=>h==="备注", h=>h==="管理者备注", h=>h.includes("备注"))
   };
@@ -7254,9 +7445,10 @@ function ingestRows(records){
     const sr = S.base.find(b => b.hospCode===String(r.hospCode).trim() && b.product===String(r.product).trim());
     const k = rowKey(sr);
     const prev = oldFill[k] || {};
-    const f = { step:prev.step||0, equip:prev.equip||"", blocker:prev.blocker||"", note:prev.note||"", updatedBy:prev.updatedBy||"", updatedAt:prev.updatedAt||0 };
+    const f = { step:prev.step||0, equip:prev.equip||"", layout:prev.layout||"", blocker:prev.blocker||"", note:prev.note||"", updatedBy:prev.updatedBy||"", updatedAt:prev.updatedAt||0 };
     if (r.stepSel != null && String(r.stepSel).trim()) f.step = parseStep(sr.contracted, r.stepSel);
     if (r.equip != null && String(r.equip).trim()) f.equip = String(r.equip).trim();
+    if (r.layout != null && String(r.layout).trim()) f.layout = String(r.layout).trim();
     if (r.blocker != null && String(r.blocker).trim()) f.blocker = String(r.blocker).trim();
     if (r.note != null && String(r.note).trim()) f.note = String(r.note).trim();
     newFill[k] = f;
@@ -7277,7 +7469,7 @@ async function importFromText(text){
   for (let i=1;i<lines.length;i++){
     const cells = lines[i].split(sep);
     const g = idx => idx>=0 ? (cells[idx]??"").trim() : "";
-    recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),blocker:g(C.blocker),note:g(C.note) });
+    recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),layout:g(C.layout),blocker:g(C.blocker),note:g(C.note) });
   }
   if (ingestRows(recs)){ await saveBase(); await saveFill(); toast("已导入 "+S.base.length+" 条记录"); rerender(); }
 }
@@ -7301,7 +7493,7 @@ function handleXlsxFile(file){
         const cells = arr[i];
         const g = idx => idx>=0 ? cells[idx] : "";
         if (!String(g(C.hospCode)).trim() && !String(g(C.product)).trim()) continue;
-        recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),blocker:g(C.blocker),note:g(C.note) });
+        recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),layout:g(C.layout),blocker:g(C.blocker),note:g(C.note) });
       }
       if (ingestRows(recs)){ await saveBase(); await saveFill(); toast("已从「"+sheetName+"」导入 "+S.base.length+" 条记录"); rerender(); }
     } catch(err){ console.error(err); toast("⚠ 解析失败:"+err.message); }
@@ -7317,13 +7509,13 @@ function exportFillXlsx(){
     if (ff.q){ const q=ff.q.toLowerCase(); rs=rs.filter(r=>(r.hospName+r.hospCode+r.rep+r.manager+r.province+r.product).toLowerCase().includes(q)); }
     return rs;
   })();
-  const head = ["销售大区","销售经理","销售代表","省份","医院名称","医院code","是否签约医院","产品","耗材入院进度选择","入院进度","与上版对比","ZSR设备计划","目前业务卡点","年化签约量","年化自由量","管理者备注"];
+  const head = ["销售大区","销售经理","销售代表","省份","医院名称","医院code","是否签约医院","产品","耗材入院进度选择","设备布局状态","入院进度","与上版对比","ZSR设备计划(选填)","年化签约量","年化自由量","管理者备注"];
   const data = [head];
   for (const r of rows){
     const stepLabel = r.step ? (stepInfo(r.contracted,r.step)||{}).label || "" : "";
     const prog = r.contracted ? (r.step?(r.step>=3?"已入院":(r.step===2?"已试用":"未入院")):"") : (r.step===6?"临采":(r.step?fmtPct(r.pct):""));
     const cmp = compareTag(r).label;
-    data.push([r.region,r.manager,r.rep,r.province,r.hospName,r.hospCode,r.contracted?"是":"否",r.product,stepLabel,prog,cmp,r.equip,r.blocker,r.contractVol,r.freeVol,r.note]);
+    data.push([r.region,r.manager,r.rep,r.province,r.hospName,r.hospCode,r.contracted?"是":"否",r.product,stepLabel,r.layout,prog,cmp,(isAnreiProd(r.product)?"":r.equip),r.contractVol,r.freeVol,r.note]);
   }
   const ws = XLSX.utils.aoa_to_sheet(data);
   ws["!cols"] = head.map((h,i)=>({ wch: [10,10,10,8,30,12,12,14,12,12,10,14,22,12,12,20][i]||12 }));
@@ -7435,7 +7627,7 @@ async function backgroundSync(){
   try { await loadAll(false); applyAdminTabVis(); rerender(); }
   catch(e){ console.error("鞘入院跟进 后台同步失败:", e); }
 }
-/* ★ 鞘 看板 / 报表 自动刷新:管理者/管理员页面定时探测 zsr_data 是否有新数据,有更新才静默重拉。
+/* ★ 鞘 看板 / 报表 自动刷新:管理者/管理员页面定时探测云端表(fc_data)是否有新数据,有更新才静默重拉。
    与主程序共用开关 fc-autorefresh;仅在线、纯查看页生效;有未提交编辑则跳过。 */
 let _zArTimer = null, _zArLastTs = 0;
 function zAutoRefreshOn(){ try { return localStorage.getItem("fc-autorefresh") !== "0"; } catch(e){ return true; } }
@@ -8138,13 +8330,13 @@ function exportBothXlsx(){
     if (ff.q){ const q=ff.q.toLowerCase(); rs=rs.filter(r=>(r.hospName+r.hospCode+r.rep+r.manager+r.province+r.product).toLowerCase().includes(q)); }
     return rs;
   })();
-  const head1 = ["销售大区","销售经理","销售代表","省份","医院名称","医院code","是否签约医院","产品","耗材入院进度选择","入院进度","与上版对比","ZSR设备计划","目前业务卡点","年化签约量","年化自由量","管理者备注"];
+  const head1 = ["销售大区","销售经理","销售代表","省份","医院名称","医院code","是否签约医院","产品","耗材入院进度选择","设备布局状态","入院进度","与上版对比","ZSR设备计划(选填)","年化签约量","年化自由量","管理者备注"];
   const data1 = [head1];
   for (const r of rows){
     const stepLabel = r.step ? (stepInfo(r.contracted,r.step)||{}).label || "" : "";
     const prog = r.contracted ? (r.step?(r.step>=3?"已入院":(r.step===2?"已试用":"未入院")):"") : (r.step===6?"临采":(r.step?fmtPct(r.pct):""));
     const cmp = compareTag(r).label;
-    data1.push([r.region,r.manager,r.rep,r.province,r.hospName,r.hospCode,r.contracted?"是":"否",r.product,stepLabel,prog,cmp,r.equip,r.blocker,r.contractVol,r.freeVol,r.note]);
+    data1.push([r.region,r.manager,r.rep,r.province,r.hospName,r.hospCode,r.contracted?"是":"否",r.product,stepLabel,r.layout,prog,cmp,(isAnreiProd(r.product)?"":r.equip),r.contractVol,r.freeVol,r.note]);
   }
   const ws1 = XLSX.utils.aoa_to_sheet(data1);
   ws1["!cols"] = head1.map((h,i)=>({ wch: [10,10,10,8,30,12,12,14,12,12,10,14,22,12,12,20][i]||12 }));
@@ -8352,15 +8544,15 @@ window.__zsrFcEntries = function(){
   }
   return out;
 };
-/* ★ 桥接:探测鞘模块云端(zsr_data)连接与记录条数,供主后台「一键检测云端」统一展示。 */
+/* ★ 桥接:探测鞘模块云端连接与记录条数(鞘与主共用 fc_data 表,仅统计 "zsr-" 前缀的键),供主后台「一键检测云端」统一展示。 */
 window.__zsrCloudProbe = async function(){
   if (!(Store.sbEnabled && Store.sb)) return { enabled:false, shared: !!Store.shared };
   try {
-    const { count, error } = await Store.sb.from(SB_TABLE).select("*", { count:"exact", head:true });
+    const { data, error } = await Store.sb.from(SB_TABLE).select("key");
     if (error) return { enabled:true, error: error.message || "连接失败" };
-    let hasFill=false, hasFc=false, hasBase=false;
-    try { const { data } = await Store.sb.from(SB_TABLE).select("key"); if (data){ const ks=new Set(data.map(x=>x.key)); hasFill=ks.has("zsr-fill"); hasFc=ks.has("zsr-fc-fill"); hasBase=ks.has("zsr-base"); } } catch(e){}
-    return { enabled:true, count: count||0, hasFill, hasFc, hasBase };
+    const ks = new Set((data||[]).map(x=>x.key));
+    const zsrCount = [...ks].filter(k => String(k).startsWith("zsr-")).length;
+    return { enabled:true, count: zsrCount, hasFill:ks.has("zsr-fill"), hasFc:ks.has("zsr-fc-fill"), hasBase:ks.has("zsr-base") };
   } catch(e){ return { enabled:true, error: String(e && e.message || e) }; }
 };
 zboot();
