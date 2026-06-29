@@ -261,10 +261,18 @@ tr.ovdet>td{padding:0;background:#FBFCFE;border-bottom:1px solid var(--line)}
 .ovmt tr.z td{color:#AAB3C0}
 .ovpc{display:flex;align-items:center;gap:8px}
 .ovbar{flex:1;height:8px;border-radius:4px;background:#EEF1F6;overflow:hidden}
-.ovbar>i{display:block;height:100%;border-radius:4px}
+.ovbar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#6E93D6,#2054E0)}
 .ov-prod.zsr .ovbar>i{background:linear-gradient(90deg,#6E93D6,#2054E0)}
 .ov-prod.anrei .ovbar>i{background:linear-gradient(90deg,#5BBF93,#0D7F56)}
 .ovpn{width:40px;text-align:right;font-family:var(--num);font-size:11.5px;color:var(--ink2)}
+/* 入院+预估看板:维度行展开的「筛选概览」明细嵌在 .dt 单元格内,
+   隔离 .dt 通用单元格样式(竖边框/斑马纹/表头sticky)对内嵌 ovt/ovmt 的影响 */
+.dt td.dd-det{padding:0;text-align:left;background:#F7F9FC}
+.dd-det .ovt thead tr,.dd-det .ovmt thead tr{position:static;z-index:auto}
+.dd-det .ovt td{background:#fff}
+.dd-det .ovmt td{background:#fff}
+.dd-det .ovt td,.dd-det .ovt th,.dd-det .ovmt td,.dd-det .ovmt th{border-right:none}
+.dd-det .det-cap{font-size:11.5px;color:var(--mute);margin-bottom:6px;font-weight:600}
 /* 提报进度: 各经理(DSM)表格统一列宽 —— 固定布局 + 统一 colgroup, 与内容无关 */
 table.dt.prog-tbl{table-layout:fixed;min-width:700px}
 .dt.prog-tbl col.c-rep{width:180px}
@@ -378,6 +386,10 @@ td.warn,.warn{color:var(--amber);font-weight:600}
 .drillbar-sp{flex:1 1 12px}
 .drillbar-count{font-size:11.5px;color:var(--blue);font-weight:600;white-space:nowrap}
 .drillbar .ms-trigger{min-width:124px}
+/* AOP 指标筛选并入下钻条(填写跟进/入院进度页),与维度下钻并排显示 */
+.drill-aop{display:inline-flex;align-items:center;gap:7px;margin-left:2px;padding-left:10px;border-left:1px solid var(--line2)}
+.drill-aop-lab{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--mute);white-space:nowrap}
+.drill-aop .seg button{padding:5px 11px;font-size:12px}
 .ms-trigger-txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ms-cur{
   font-size:9.5px;font-weight:700;color:#fff;background:var(--blue);
@@ -6411,7 +6423,7 @@ const Z_DDIMS = ["region","manager","rep","province","product","status"];
 const Z_DNAME = { region:"大区", manager:"经理", rep:"代表", province:"省份", product:"产品", status:"是否签约" };
 function zEnsureDrill(){ if(!S.zDrill) S.zDrill={}; for(const dk of Z_DDIMS) if(!Array.isArray(S.zDrill[dk])) S.zDrill[dk]=[]; }
 function zDimVal(dk, r, signedOf){
-  if(dk==="status") return ((signedOf?signedOf(r):r.contracted)?"签约":"未签约");
+  if(dk==="status") return ((signedOf?signedOf(r):r.contracted)?"签约":"非签约");
   return r[dk];
 }
 function zApplyDrill(rows, signedOf){
@@ -6420,7 +6432,7 @@ function zApplyDrill(rows, signedOf){
   for(const dk of Z_DDIMS){ const fv=S.zDrill[dk]; if(fv&&fv.length) out=out.filter(r=>fv.includes(zDimVal(dk,r,signedOf))); }
   return out;
 }
-function zDrillBarHtml(scoped, signedOf){
+function zDrillBarHtml(scoped, signedOf, extra){
   zEnsureDrill();
   let h = '<div class="drillbar zdrill"><span class="drillbar-lab">▾ 下钻筛选</span>';
   for(const dk of Z_DDIMS){
@@ -6435,6 +6447,7 @@ function zDrillBarHtml(scoped, signedOf){
     h += '</div></div>';
   }
   const activeN = Z_DDIMS.reduce((n,dk)=>n+((S.zDrill[dk]||[]).length?1:0),0);
+  if(extra) h += extra;   // 额外并排筛选器(如填写页的 有/无AOP 指标)
   h += '<span class="drillbar-sp"></span>';
   if(activeN) h += '<span class="drillbar-count">'+activeN+' 个维度已筛选</span><button class="btn sm" id="zdrill-clear">清除筛选</button>';
   h += '</div>';
@@ -6517,8 +6530,9 @@ function filteredStepRows(all){
    汇总列:医院数 · 上一次填写医院数 · 指标 · 预估 · 达成率 · 上一次预估数(指标/预估/上一次预估随金额↔数量切换,默认数量)。
    展开分布:左「按耗材入院进展」、右「按设备布局状态」(安瑞鞘无布局,右侧留空);明细列=本次填写医院数·上个版本医院数·占比(条+%)。
    「上一次/上个版本」取最近一个已保存版本(快照已附 step/layout/预估FY/预估件数);无版本显示 –。 */
-let _ovOpen = new Set();   // 展开的 签约/未签约 行(内存,默认收起)
+let _ovOpen = new Set();   // 展开的 签约/非签约 行(内存,默认收起)
 let _ovBound = false;
+let _fillAopMap = {};      // 填写表「全年/YTD指标」缓存(金额K),供排序复用;renderFill 时刷新
 const OV_SIDES = [
   { k:"zsr",   title:"ZSR测压鞘", cls:"zsr",   pred:r=>isZsrProd(r.product),  hasLayout:true },
   { k:"anrei", title:"Anrei鞘",   cls:"anrei", pred:r=>isAnreiProd(r.product), hasLayout:false }
@@ -6531,11 +6545,12 @@ function stepOverviewHtml(rows){
   const isQty = metric==="qty";
   const unit = isQty ? "件" : "千元K";
   // 预估/指标:按口径(数量 q / 金额 a)取值
-  const fcMap={}, aopMap={};
+  const fcMap={}, aopMap={}, aopYtdMap={};
+  const actSet = new Set((S.fcCfg && S.fcCfg.actMonths) || []);   // 后台关账月 → YTD指标
   for (const e of fcBuildEntries()){
-    let fc=0, aop=0;
-    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); aop += isQty?(e.aopQ[i]||0):(e.aopA[i]||0); }
-    fcMap[e.key]=fc; aopMap[e.key]=aop;
+    let fc=0, aop=0, ytd=0;
+    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av; if(actSet.has(i+1)) ytd+=av; }
+    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd;
   }
   const ver = latestVersion();
   const pd = ver && ver.data ? ver.data : null;
@@ -6547,10 +6562,10 @@ function stepOverviewHtml(rows){
   const calcSum = (ents, pred, ppred) => {
     const cur = ents.filter(pred);
     const hosp = new Set(cur.map(r=>r.hospCode)).size;
-    let aop=0, fc=0, cv=0, fv=0; for (const r of cur){ aop += aopMap[r.key]||0; fc += fcMap[r.key]||0; cv += (+r.contractVol||0); fv += (+r.freeVol||0); }
+    let aop=0, ytd=0, fc=0, cv=0, fv=0; for (const r of cur){ aop += aopMap[r.key]||0; ytd += aopYtdMap[r.key]||0; fc += fcMap[r.key]||0; cv += (+r.contractVol||0); fv += (+r.freeVol||0); }
     let ph=null, pf=null;
     if (pd){ const pr=ents.filter(ppred); ph=new Set(pr.map(r=>r.hospCode)).size; pf=0; for (const r of pr) pf += pFc(r.key); }
-    return { hosp, cv, fv, aop, fc, ach: aop>0?fc/aop:null, ph, pf };
+    return { hosp, cv, fv, aop, ytd, fc, ach: aop>0?fc/aop:null, ph, pf };
   };
   // 分布行(仅家数)
   const cnt = (ents, pred, ppred) => {
@@ -6593,9 +6608,10 @@ function stepOverviewHtml(rows){
         '<td class="l"'+pad+'>'+car+esc(label)+'</td>'+
         '<td class="num">'+N(c.hosp)+'</td>'+
         '<td class="num">'+N(c.cv)+'</td><td class="num">'+N(c.fv)+'</td>'+
-        '<td class="num">'+D(c.ph)+'</td>'+
-        '<td class="num">'+N(c.aop)+'</td><td class="num"><b>'+N(c.fc)+'</b></td>'+
+        '<td class="num">'+N(c.aop)+'</td><td class="num">'+N(c.ytd)+'</td>'+
+        '<td class="num"><b>'+N(c.fc)+'</b></td>'+
         '<td class="num ov-ach '+achCls(c.ach)+'">'+(c.ach==null?'–':(c.ach*100).toFixed(1)+'%')+'</td>'+
+        '<td class="num">'+D(c.ph)+'</td>'+
         '<td class="num">'+D(c.pf)+'</td></tr>';
     };
     // 展开分布行:groupPred 已含 有/无AOP + 签约/未签约 条件
@@ -6605,21 +6621,21 @@ function stepOverviewHtml(rows){
       let inner='<div class="ovdw"><div class="ovh"><div class="ovh-t">按耗材入院进展 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, false)+'</div>';
       inner += side.hasLayout ? ('<div class="ovh"><div class="ovh-t">按设备布局状态 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, true)+'</div>') : '<div class="ovh ovh-empty">安瑞鞘无设备布局状态</div>';
       inner += '</div>';
-      return '<tr class="ovdet"><td colspan="9">'+inner+'</td></tr>';
+      return '<tr class="ovdet"><td colspan="10">'+inner+'</td></tr>';
     };
-    // 一个 AOP 分组(有/无)下的:小计行 + 签约/未签约(可展开)
+    // 一个 AOP 分组(有/无)下的:小计行 + 签约/非签约(可展开)
     const aopGroup = (label, hasPred, kpfx) => {
       let g = sumRow(label, calcSum(ents, r=>hasPred(r), r=>hasPred(r)), {cls:"ovhdr"});
       const sId=side.k+":"+kpfx+"-sign", uId=side.k+":"+kpfx+"-unsign";
       const signPred=r=>hasPred(r)&&r.contracted, unPred=r=>hasPred(r)&&!r.contracted;
       g += sumRow(label.replace("医院","")+"的签约医院", calcSum(ents, signPred, signPred), {expId:sId, indent:true});
       if (_ovOpen.has(sId)) g += detail(signPred, true);
-      g += sumRow(label.replace("医院","")+"的未签约医院", calcSum(ents, unPred, unPred), {expId:uId, indent:true});
+      g += sumRow(label.replace("医院","")+"的非签约医院", calcSum(ents, unPred, unPred), {expId:uId, indent:true});
       if (_ovOpen.has(uId)) g += detail(unPred, false);
       return g;
     };
     let h = '<div class="ov-prod '+side.cls+'"><div class="ov-pbar"><span class="ov-pt">'+esc(side.title)+'</span><span class="hint">单位:'+unit+'</span></div>';
-    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>上一次填写医院数</th><th>指标</th><th>预估</th><th>达成率</th><th>上一次预估数</th></tr></thead><tbody>';
+    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>全年指标</th><th>YTD指标</th><th>预估</th><th>达成率</th><th>上一次填写医院数</th><th>上一次预估数</th></tr></thead><tbody>';
     h += sumRow("区域内总医院", calcSum(ents, ()=>true, ()=>true), {cls:"ovtop"});
     h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
     h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
@@ -6678,6 +6694,8 @@ function renderFill(){
 
   // 行内交叉提示:该院该产品的「月度预估FY」金额(K),供医院列内联展示
   const FCFY = (S.fcBase && S.fcBase.length) ? fcFyByKey() : null;
+  // 全年指标 / YTD指标(金额K,按 医院code|产品 关联鞘预估AOP;YTD随后台关账月联动),供新列展示与排序
+  _fillAopMap = (S.fcBase && S.fcBase.length) ? fcAopByKey(false) : {};
 
   // 表格列定义(全部)
   const allCols = [
@@ -6687,9 +6705,11 @@ function renderFill(){
     { id:"province", label:"省份",   cls:"l", w:70,  sv:r=>r.province, td:r=>'<td class="l dim">'+esc(r.province)+'</td>' },
     { id:"hosp",     label:"医院名称",cls:"l stick1", w:150, sv:r=>r.hospName, td:r=>'<td class="l stick1" title="'+esc(r.hospName)+(r.hospCode?(' · '+esc(r.hospCode)):'')+'"><div style="width:134px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.hospName)+'<span class="subc" style="color:var(--mute);font-size:10px"> · '+esc(r.hospCode)+'</span>'+(FCFY?xhFcChip(FCFY[rowKey(r)]!=null?FCFY[rowKey(r)]:null):'')+'</div></td>' },
     { id:"product",  label:"产品",   cls:"l", w:120, sv:r=>r.product,  td:r=>'<td class="l">'+esc(r.product)+'</td>' },
-    { id:"status",   label:"签约",   cls:"c", w:62,  sv:r=>r.contracted?1:0, td:r=>'<td class="c"><span class="tag '+(r.contracted?"signed":"unsigned")+'">'+(r.contracted?"签约":"未签约")+'</span></td>' },
+    { id:"status",   label:"签约",   cls:"c", w:62,  sv:r=>r.contracted?1:0, td:r=>'<td class="c"><span class="tag '+(r.contracted?"signed":"unsigned")+'">'+(r.contracted?"签约":"非签约")+'</span></td>' },
     { id:"cv",       label:"年化签约量",cls:"", w:84, sv:r=>r.contractVol, td:r=>'<td class="num dim">'+fmtN(r.contractVol)+'</td>' },
     { id:"fv",       label:"年化自由量",cls:"", w:84, sv:r=>r.freeVol,     td:r=>'<td class="num dim">'+fmtN(r.freeVol)+'</td>' },
+    { id:"fyAop",    label:"全年指标(K)",cls:"", w:92, sv:r=>(_fillAopMap[rowKey(r)]||{}).fy||0,  td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="全年AOP指标(金额K)">'+(a?fmtN(a.fy):'–')+'</td>'; } },
+    { id:"ytdAop",   label:"YTD指标(K)",cls:"", w:92, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytd||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="YTD AOP指标(金额K,随后台关账月联动)">'+(a?fmtN(a.ytd):'–')+'</td>'; } },
     { id:"step",     label:"耗材入院进度(选择)",cls:"l", w:158, sv:r=>r.step, td:r=>stepCellTd(r, editable) },
     { id:"layout",   label:"设备布局状态",cls:"l", w:152, sv:r=>r.layout, td:r=>layoutCellTd(r, editable) },
     { id:"pct",      label:"入院进度",cls:"l", w:150, sv:r=>(r.pct!=null?r.pct:(r.step===6?1.01:(r.contracted?(r.step/3):-1))), td:r=>progCellTd(r) },
@@ -6699,20 +6719,19 @@ function renderFill(){
   ];
   const cols = allCols.filter(c => S.fillColVis[c.id] !== false);
 
-  // 下钻筛选条(四界面共享 · 含 是否签约,与看板/报表联动)
-  h += zDrillBarHtml(all);
+  // 下钻筛选条(四界面共享 · 含 是否签约,与看板/报表联动);AOP 指标筛选并入此条并排显示
+  const aopCur = (ff && ff.aop) || "all";
+  const aopExtra = '<span class="drill-aop"><span class="drill-aop-lab">AOP指标</span><span class="seg" id="f-aop" title="年化签约量 + 年化自由量 > 0 视为「有AOP」">' +
+    [["all","全部"],["yes","有AOP"],["no","无AOP"]].map(([v,l])=>'<button data-a="'+v+'" class="'+(aopCur===v?"on":"")+'">'+l+'</button>').join("") + '</span></span>';
+  h += zDrillBarHtml(all, null, aopExtra);
 
   // 工具条:搜索 + 显示字段
   const colToggleLabel = (id) => {
-    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
+    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', fyAop:'全年指标(K)', ytdAop:'YTD指标(K)', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
     return map[id] || id;
   };
   h += '<div class="toolbar">';
   h += '<div style="flex:1 1 220px;min-width:200px"><div class="lbl">搜索</div><input class="ctrl" id="f-q" placeholder="医院 / code / 代表…" value="'+esc((ff&&ff.q)||"")+'" style="width:100%"></div>';
-  // AOP 指标筛选(年化签约量+自由量>0 视为有AOP)
-  const aopCur = (ff && ff.aop) || "all";
-  h += '<div><div class="lbl">AOP 指标</div><div class="seg" id="f-aop" title="年化签约量 + 年化自由量 > 0 视为「有AOP」">' +
-    [["all","全部"],["yes","有AOP"],["no","无AOP"]].map(([v,l])=>'<button data-a="'+v+'" class="'+(aopCur===v?"on":"")+'">'+l+'</button>').join("") + '</div></div>';
   h += '<div class="ms-wrap" id="f-colvis" style="margin-left:auto"><div class="ms-trigger"><span class="ms-trigger-txt">☰ 显示字段</span></div><div class="ms-panel">';
   for (const c of allCols) h += '<label><input type="checkbox" data-cvid="'+c.id+'"'+(S.fillColVis[c.id]!==false?' checked':'')+'> '+colToggleLabel(c.id)+'</label>';
   h += '</div></div>';
@@ -6815,6 +6834,8 @@ function layoutCellTd(r, editable){
   return s + '</select></td>';
 }
 function sortValFill(r, id){
+  if (id==="fyAop")  return (_fillAopMap[rowKey(r)]||{}).fy  || 0;
+  if (id==="ytdAop") return (_fillAopMap[rowKey(r)]||{}).ytd || 0;
   const map = { region:r.region, manager:r.manager, rep:r.rep, province:r.province, hosp:r.hospName, product:r.product,
     status:r.contracted?1:0, cv:r.contractVol, fv:r.freeVol, step:r.step,
     layout:r.layout,
@@ -6902,36 +6923,55 @@ function bindFill(cols){
 }
 
 /* =================== 入院看板 =================== */
+/* =================== 鞘 · 入院+预估看板(维度对比表 + 筛选概览明细) ===================
+   维度做主轴(by 产品/省份/经理/大区/代表),每行点开 = 与「填写跟进」同款筛选概览:
+   区域内总医院 → 有/无AOP医院 → 各自签约/未签约(可再展开 进展+布局 分布)。
+   口径=金额K/数量(默认数量);AOP顶部筛选(全部/有AOP/无AOP);指标/预估为全年(FY=12月合计)。
+   入院/签约量/医院数 来自入院基础(buildRows),指标/预估按 医院code|产品 关联鞘预估(fcBuildEntries)。 */
 function renderDash(){
   const host = $("#ztab-dash");
-  if (S.dashView === "fc"){ renderForecastDash(); return; }
-  if (!S.base.length){ host.innerHTML = '<div class="card"><div class="card-h">'+viewSegHtml("step","dash")+'</div><div class="empty"><b>还没有数据</b>请在「管理后台」导入基础数据。</div></div>'; bindDashViewSeg(); return; }
+  if (!S.base.length){ host.innerHTML = '<div class="card"><div class="card-h"><b>📊 入院+预估看板</b></div><div class="empty"><b>还没有数据</b>请在「管理后台」导入医院 / 产品基础数据。</div></div>'; return; }
   const d = S.dash;
   if (!DIMS[d.dim]) d.dim = "product";
+  const hasQty = !!(S.fcCfg && S.fcCfg.hasQty);
+  if (!d.metric) d.metric = hasQty ? "qty" : "amt";
+  if (d.metric === "qty" && !hasQty) d.metric = "amt";
+  if (!d.aopF) d.aopF = "all";
+  if (!d.open) d.open = new Set();
+  if (!d.sub)  d.sub  = new Set();
+  const isQty = d.metric === "qty";
+  const unit  = isQty ? "件" : "千元K";
 
-  let rows = zApplyDrill(scopedRows());   // ★ 共享下钻筛选(四界面联动)
+  // 全年指标/YTD指标/预估(按口径取金额a/数量q),按 医院code|产品 关联;YTD随后台关账月联动
+  const fcMap = {}, aopMap = {}, aopYtdMap = {};
+  const actSet = new Set((S.fcCfg && S.fcCfg.actMonths) || []);
+  for (const e of fcBuildEntries()){
+    let fc = 0, aop = 0, ytd = 0;
+    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av; if(actSet.has(i+1)) ytd+=av; }
+    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd;
+  }
+  // 聚合(主表与概览子表共用)
+  const dAgg = rs => {
+    const hosp = new Set(rs.map(r=>r.hospCode)).size;
+    let cv=0, fv=0, aop=0, ytd=0, fc=0;
+    for (const r of rs){ cv+=(+r.contractVol||0); fv+=(+r.freeVol||0); aop+=aopMap[r.key]||0; ytd+=aopYtdMap[r.key]||0; fc+=fcMap[r.key]||0; }
+    const inh = new Set(rs.filter(r=>r.entered).map(r=>r.hospCode)).size;
+    return { hosp, cv, fv, aop, ytd, fc, ach: aop>0?fc/aop:null, inh };
+  };
 
-  // 汇总指标
-  const overall = aggStats(rows);
+  // 范围 + 共享下钻 + 顶部AOP筛选
+  let rows = zApplyDrill(scopedRows());
+  if (d.aopF==="yes") rows = rows.filter(hasAopVol);
+  else if (d.aopF==="no") rows = rows.filter(r => !hasAopVol(r));
 
-  // KPI 概览
-  let h = '<div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px">'+viewSegHtml("step","dash")+'<b style="margin-left:6px">入院看板</b><span class="hint">不同维度的入院进度与入院家数 · 可下钻筛选</span></div>';
-  const kS = dashKpiStats(rows);
-  h += '<div class="kpis">' +
-    kpi("医院数", kS.hospAll, "Anrei "+kS.hospAnrei+" · ZSR "+kS.hospZSR+" 家") +
-    kpi("签约医院数", kS.signAll, "Anrei "+kS.signAnrei+" · ZSR "+kS.signZSR+" 家") +
-    kpi("已填写产品次", kS.filledAll, "ZSR "+kS.filledZSR+" · Anrei "+kS.filledAnrei+" 次") +
-    kpi("耗材已入院医院数", kS.cinAll, "Anrei "+kS.cinAnrei+" · ZSR "+kS.cinZSR+" 家") +
-    kpi("ZSR设备已入院", kS.equipInAll, "家 · 设备计划已入院") +
-    '<div class="kpi"><small>耗材入院率</small><b style="font-size:17px">全部 '+(kS.inRateAll==null?"–":fmtPct(kS.inRateAll))+' · 签约 '+(kS.signInRate==null?"–":fmtPct(kS.signInRate))+'</b><span class="sub">全部 '+kS.cinAll+'/'+kS.hospAll+' · 签约 '+kS.signCin+'/'+kS.signAll+' 家</span></div>' +
-    '</div>';
-
-  // 维度切换
+  // 顶部工具条:维度 / 口径 / AOP
+  let h = '<div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px"><b>📊 入院+预估看板</b><span class="hint">维度对比表 · 点行展开「筛选概览」明细 · 全年指标=FY全年AOP,YTD指标随后台关账月联动</span></div>';
   h += '<div class="toolbar" style="border-top:1px solid var(--line)">';
-  h += '<div><div class="lbl">汇总维度</div><div class="seg" id="d-dim">' +
+  h += '<div><div class="lbl">汇总维度</div><div class="seg" id="dd-dim">' +
     ["product","province","manager","region","rep"].map(k => '<button data-d="'+k+'" class="'+(d.dim===k?"on":"")+'">by '+DIMS[k].name+'</button>').join("") + '</div></div>';
+  h += '<div><div class="lbl">口径</div><div class="seg" id="dd-metric"><button data-m="amt" class="'+(isQty?"":"on")+'">金额K</button><button data-m="qty" class="'+(isQty?"on":"")+'"'+(hasQty?"":' disabled title="无数量数据"')+'>数量</button></div></div>';
+  h += '<div><div class="lbl">AOP 指标</div><div class="seg" id="dd-aop"><button data-a="all" class="'+(d.aopF==="all"?"on":"")+'">全部</button><button data-a="yes" class="'+(d.aopF==="yes"?"on":"")+'">有AOP</button><button data-a="no" class="'+(d.aopF==="no"?"on":"")+'">无AOP</button></div></div>';
   h += '</div>';
-
   // 下钻筛选条(四界面共享 · 含 是否签约)
   h += zDrillBarHtml(scopedRows());
   h += '</div>';
@@ -6939,36 +6979,117 @@ function renderDash(){
   // 主表(按维度)
   const groups = {};
   for (const r of rows){ const key = DIMS[d.dim].f(r) || "(未填)"; (groups[key] = groups[key] || []).push(r); }
-  let gList = Object.keys(groups).map(k => ({ key:k, stats:aggStats(groups[k]) }));
-  // 默认按 入院家数 降序
+  let gList = Object.keys(groups).map(k => ({ key:k, rs:groups[k], a:dAgg(groups[k]) }));
+  const sortVal = (g,id) => id==="dim" ? g.key : (g.a[id]==null ? (id==="ach"?-1:0) : g.a[id]);
   if (d.sort){
     const dir = d.sort.dir==="asc"?1:-1, id=d.sort.id;
-    gList.sort((a,b)=>{ const x=sortValDash(a,id),y=sortValDash(b,id); if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; if(typeof x==="string"||typeof y==="string")return String(x).localeCompare(String(y),"zh")*dir; return (x-y)*dir; });
-  } else gList.sort((a,b)=>b.stats.entered - a.stats.entered);
+    gList.sort((a,b)=>{ const x=sortVal(a,id), y=sortVal(b,id); if(typeof x==="string"||typeof y==="string")return String(x).localeCompare(String(y),"zh")*dir; return (x-y)*dir; });
+  } else gList.sort((a,b)=> b.a.aop - a.a.aop);
 
-  const dcols = [
-    { id:"dim",     label:DIMS[d.dim].name, cls:"l stick1", w:150, sv:g=>g.key },
-    { id:"n",       label:"记录数",   w:70,  sv:g=>g.stats.n },
-    { id:"filled",  label:"已填写",   w:70,  sv:g=>g.stats.filled },
-    { id:"entered", label:"入院家数", w:84,  sv:g=>g.stats.entered },
-    { id:"avgPct",  label:"未签约平均进度", w:120, sv:g=>g.stats.avgPct },
-    { id:"linchai", label:"临采",     w:60,  sv:g=>g.stats.linchai },
-    { id:"signRate",label:"签约入院率",w:96,  sv:g=>g.stats.signRate },
-    { id:"stage",   label:"阶段分布(未签约 意向→临采 / 签约 入院)", cls:"l", w:230, sv:g=>g.stats.entered }
+  const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
+  const cols = [
+    { id:"dim",  label:DIMS[d.dim].name, cls:"l stick1", w:150 },
+    { id:"hosp", label:"医院数",     w:74 },
+    { id:"cv",   label:"年化签约量", w:96 },
+    { id:"fv",   label:"年化自由量", w:96 },
+    { id:"aop",  label:"全年指标",   w:90 },
+    { id:"ytd",  label:"YTD指标",    w:90 },
+    { id:"fc",   label:"预估",       w:88 },
+    { id:"ach",  label:"达成率",     w:84 },
+    { id:"inh",  label:"入院家数",   w:84 }
   ];
-  h += '<div class="card"><div class="card-h"><b>by ' + DIMS[d.dim].name + ' · 入院进度与家数</b><span class="hint">入院家数 = 未签约「已入院/临采」+ 签约「已入院」 · 点表头排序 · 拖列缘调宽</span></div>';
-  h += '<div class="twrap"><table class="dt" id="dash-tbl"><thead><tr>';
-  for (const c of dcols){ const sorted = d.sort && d.sort.id===c.id; h += '<th class="'+(c.cls||"")+' sortable'+(sorted?" sorted":"")+'" data-cid="'+c.id+'"'+(c.w?' style="min-width:'+c.w+'px"':'')+'>'+c.label+'<span class="sort-ico">'+(sorted?(d.sort.dir==="asc"?"▲":"▼"):"⇅")+'</span></th>'; }
+  h += '<div class="card"><div class="card-h"><b>by ' + DIMS[d.dim].name + ' · 入院 + 预估</b><span class="hint">入院家数=已入院医院去重 · 点行展开筛选概览 · 点表头排序 · 单位:'+unit+'</span></div>';
+  h += '<div class="twrap"><table class="dt" id="dd-tbl"><thead><tr>';
+  for (const c of cols){ const sorted = d.sort && d.sort.id===c.id; h += '<th class="'+(c.cls||"")+' sortable'+(sorted?" sorted":"")+'" data-cid="'+c.id+'"'+(c.w?' style="min-width:'+c.w+'px"':'')+'>'+c.label+'<span class="sort-ico">'+(sorted?(d.sort.dir==="asc"?"▲":"▼"):"⇅")+'</span></th>'; }
   h += '</tr></thead><tbody>';
-  for (const g of gList) h += dashRow(g, dcols);
+  for (const g of gList){
+    const a=g.a, open=d.open.has(g.key);
+    h += '<tr class="grp-row'+(open?'':' collapsed')+'" data-dim="'+esc(g.key)+'">'+
+      '<td class="l stick1"><span class="grp-caret">▾</span>'+esc(g.key)+'</td>'+
+      '<td class="num">'+a.hosp+'</td>'+
+      '<td class="num">'+fmtN(a.cv)+'</td><td class="num">'+fmtN(a.fv)+'</td>'+
+      '<td class="num">'+zFmtK(a.aop)+'</td><td class="num">'+zFmtK(a.ytd)+'</td><td class="num"><b>'+zFmtK(a.fc)+'</b></td>'+
+      '<td class="num '+(achCls(a.ach)?'ov-ach '+achCls(a.ach):'')+'">'+(a.ach==null?'–':(a.ach*100).toFixed(1)+'%')+'</td>'+
+      '<td class="num"><b>'+a.inh+'</b></td></tr>';
+    if (open) h += '<tr><td class="dd-det" colspan="'+cols.length+'">'+ddOverview(g.rs, g.key, dAgg, isQty)+'</td></tr>';
+  }
   // 合计
-  h += '<tr class="total-row">' + dashTotalCells(overall, dcols) + '</tr>';
-  h += '</tbody></table></div>';
-  h += stageLegend();
-  h += '</div>';
+  const tot = dAgg(rows);
+  h += '<tr class="total-row"><td class="l stick1">合计</td><td class="num">'+tot.hosp+'</td><td class="num">'+fmtN(tot.cv)+'</td><td class="num">'+fmtN(tot.fv)+'</td><td class="num">'+zFmtK(tot.aop)+'</td><td class="num">'+zFmtK(tot.ytd)+'</td><td class="num"><b>'+zFmtK(tot.fc)+'</b></td><td class="num '+(achCls(tot.ach)?'ov-ach '+achCls(tot.ach):'')+'">'+(tot.ach==null?'–':(tot.ach*100).toFixed(1)+'%')+'</td><td class="num"><b>'+tot.inh+'</b></td></tr>';
+  h += '</tbody></table></div></div>';
 
   host.innerHTML = h;
-  bindDash();
+  bindDashNew();
+}
+/* 维度行展开的「筛选概览」明细(ZSR/安瑞合并;布局仅ZSR有值,安瑞计入"未填写") */
+function ddOverview(rs, dimVal, dAgg, isQty){
+  const d = S.dash;
+  const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
+  const ovRow = (label, c, o={}) => {
+    const expId=o.expId, open=expId&&d.sub.has(expId);
+    const car=expId?'<span class="ov-car">▸</span>':'';
+    const cls=[expId?('ovexp'+(open?' open':'')):'', o.cls||''].filter(Boolean).join(' ');
+    const pad=o.indent?' style="padding-left:24px"':'';
+    return '<tr'+(cls?' class="'+cls+'"':'')+(expId?' data-ovexp="'+esc(expId)+'"':'')+'>'+
+      '<td class="l"'+pad+'>'+car+esc(label)+'</td>'+
+      '<td class="num">'+fmtN(c.hosp)+'</td>'+
+      '<td class="num">'+fmtN(c.cv)+'</td><td class="num">'+fmtN(c.fv)+'</td>'+
+      '<td class="num">'+zFmtK(c.aop)+'</td><td class="num">'+zFmtK(c.ytd)+'</td><td class="num"><b>'+zFmtK(c.fc)+'</b></td>'+
+      '<td class="num '+(achCls(c.ach)?'ov-ach '+achCls(c.ach):'')+'">'+(c.ach==null?'–':(c.ach*100).toFixed(1)+'%')+'</td></tr>';
+  };
+  const SIGN_STEPS=[["未填写",s=>s===0],["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
+  const UNSIGN_STEPS=[["未填写",0],["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
+  const LAY=["",...LAYOUT_OPTS];
+  const miniTable = (gr, signed, byLayout) => {
+    const total = new Set(gr.map(r=>r.hospCode)).size;
+    let h='<table class="ovmt"><thead><tr><th class="l">类别</th><th>医院数</th><th class="l" style="padding-left:12px">占比</th></tr></thead><tbody>';
+    const mk=(lab,c)=>{ const pct=total>0?c/total:0;
+      return '<tr'+(c?'':' class="z"')+'><td class="l">'+esc(lab)+'</td><td class="n">'+c+'</td>'+
+        '<td class="p"><div class="ovpc"><div class="ovbar"><i style="width:'+(pct*100).toFixed(0)+'%"></i></div><span class="ovpn">'+(pct*100).toFixed(0)+'%</span></div></td></tr>'; };
+    if (byLayout){ for (const opt of LAY){ const c=new Set(gr.filter(r=>(r.layout||"")===opt).map(r=>r.hospCode)).size; h+=mk(opt||"未填写",c); } }
+    else { for (const it of (signed?SIGN_STEPS:UNSIGN_STEPS)){ const pf=signed?it[1]:(s=>s===it[1]); const c=new Set(gr.filter(r=>pf(r.step)).map(r=>r.hospCode)).size; h+=mk(it[0],c); } }
+    return h+'</tbody></table>';
+  };
+  const detail = (gr, signed) => {
+    const n=new Set(gr.map(r=>r.hospCode)).size;
+    let inner='<div class="ovdw"><div class="ovh"><div class="ovh-t">按耗材入院进展 <span class="tg">'+n+' 家</span></div>'+miniTable(gr,signed,false)+'</div>';
+    inner += '<div class="ovh"><div class="ovh-t">按设备布局状态 <span class="tg">'+n+' 家 · 仅ZSR</span></div>'+miniTable(gr,signed,true)+'</div></div>';
+    return '<tr class="ovdet"><td colspan="8">'+inner+'</td></tr>';
+  };
+  const aopGroup = (label, hasPred, kp) => {
+    const sub = rs.filter(hasPred);
+    let g = ovRow(label, dAgg(sub), {cls:"ovhdr"});
+    [["的签约医院",true],["的非签约医院",false]].forEach(([suf,signed])=>{
+      const id = d.dim+"|"+dimVal+"|"+kp+"|"+(signed?"s":"u");
+      const rr = sub.filter(r=>r.contracted===signed);
+      g += ovRow(label.replace("医院","")+suf, dAgg(rr), {expId:id, indent:true});
+      if (d.sub.has(id)) g += detail(rr, signed);
+    });
+    return g;
+  };
+  let h = '<div style="padding:10px 14px 12px"><div class="det-cap">▾ '+esc(dimVal)+' · 筛选概览明细(by '+DIMS[d.dim].name+' · 单位'+(isQty?'件':'千元K')+')</div>';
+  h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>全年指标</th><th>YTD指标</th><th>预估</th><th>达成率</th></tr></thead><tbody>';
+  h += ovRow("区域内总医院", dAgg(rs), {cls:"ovtop"});
+  h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
+  h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
+  return h + '</tbody></table></div>';
+}
+function bindDashNew(){
+  const d = S.dash;
+  $("#dd-dim").onclick    = e => { const b=e.target.closest("button"); if(b){ d.dim=b.dataset.d; d.sort=null; d.open.clear(); d.sub.clear(); renderDash(); } };
+  $("#dd-metric").onclick = e => { const b=e.target.closest("button"); if(b&&!b.disabled){ d.metric=b.dataset.m; renderDash(); } };
+  $("#dd-aop").onclick    = e => { const b=e.target.closest("button"); if(b){ d.aopF=b.dataset.a; renderDash(); } };
+  bindZDrill(renderDash);   // ★ 共享下钻(四界面联动)
+  const tbl = $("#dd-tbl");
+  if (tbl) tbl.addEventListener("click", e => {
+    if (e.target.closest(".resize-handle")) return;
+    const th = e.target.closest('th[data-cid]');
+    if (th){ const id=th.dataset.cid; if(d.sort&&d.sort.id===id) d.sort=d.sort.dir==="desc"?{id,dir:"asc"}:null; else d.sort={id,dir:"desc"}; renderDash(); return; }
+    const ov = e.target.closest('[data-ovexp]');
+    if (ov){ const id=ov.getAttribute("data-ovexp"); d.sub.has(id)?d.sub.delete(id):d.sub.add(id); renderDash(); return; }
+    const gr = e.target.closest('tr.grp-row');
+    if (gr){ const k=gr.getAttribute("data-dim"); d.open.has(k)?d.open.delete(k):d.open.add(k); renderDash(); }
+  });
 }
 
 function aggStats(rows){
@@ -7209,7 +7330,7 @@ function renderAdmin(){
     '<div class="lbl">从 Excel 复制整块(含表头)粘贴到此处,然后点「解析并导入」。也支持逗号 CSV。</div>' +
     '<textarea class="ctrl" id="a-paste" rows="7" placeholder="销售大区\t销售经理\t销售代表\t省份\t医院名称\t医院code\t是否签约医院\t产品\t年化签约量\t年化自由量&#10;段文\t廖斌\t韩晴晴\t北京市\t友谊医院\tH000014\t否\tAnrei负压鞘\t0\t20"></textarea>' +
     '<div style="margin-top:10px;display:flex;gap:10px"><button class="btn pri sm" id="a-paste-go">解析并导入</button><span class="hint" id="a-paste-msg"></span></div></div>';
-  h += '<div class="hint" style="margin-top:10px">导入将<b>替换</b>现有基础数据;已填写的进度按「医院code+产品」保留匹配。是否签约医院:填「是」即为签约,其它为未签约。</div>';
+  h += '<div class="hint" style="margin-top:10px">导入将<b>替换</b>现有基础数据;已填写的进度按「医院code+产品」保留匹配。是否签约医院:填「是」即为签约,其它为非签约。</div>';
 
   // —— B · 鞘预估月度指标(AOP / 实际值)合并进同一张导入卡片 ——
   h += '<div style="border-top:1px dashed var(--line);margin:14px 0 12px"></div>';
@@ -7549,7 +7670,7 @@ function importPkg(){
 function openHelp(){
   let h = '<div class="modal-h"><b>📖 使用说明</b></div><div class="modal-b" style="line-height:1.85;font-size:13px">';
   h += '<p><b>1. 导入数据(管理员)</b><br>在「管理后台」上传 Excel/CSV 或粘贴表格,字段含 大区/经理/代表/省份/医院名称/医院code/是否签约医院/产品/年化签约量/年化自由量。</p>';
-  h += '<p><b>2. 填写耗材入院进度</b><br>「填写跟进」按医院×产品选择「耗材入院进度(选择)」:<br>· 未签约医院 6 步 —— 意向20% / 已试用40% / 已提单60% / 已过会80% / 已入院100% / 临采(单列标记)。<br>· 签约医院 3 步 —— 未入院 / 已试用 / 已入院(不显示百分比进度)。</p>';
+  h += '<p><b>2. 填写耗材入院进度</b><br>「填写跟进」按医院×产品选择「耗材入院进度(选择)」:<br>· 非签约医院 6 步 —— 意向20% / 已试用40% / 已提单60% / 已过会80% / 已入院100% / 临采(单列标记)。<br>· 签约医院 3 步 —— 未入院 / 已试用 / 已入院(不显示百分比进度)。</p>';
   h += '<p><b>3. 对比上个版本</b><br>管理员在后台「保存版本」后,填写页会按阶段自动标注:进度提高=<span class="cmp adv">有进展</span> · 不变=<span class="cmp keep">保持</span> · 下降=<span class="cmp back">倒退</span>(红字)。</p>';
   h += '<p><b>4. ZSR设备计划 / 卡点 / 管理者备注</b><br>ZSR设备计划下拉: 未选择 / 1.医院购买(灰色不可选) / 1.0已计划 / 1.1已提单 / 1.2已招标 / 1.3已入院 / 2.代理商轮转 / 3.暂无设备; 卡点与「管理者备注」为自由文本。</p>';
   h += '<p><b>5. 入院看板</b><br>可按 产品 / 省份 / 销售经理 / 销售大区 / 销售代表 查看入院进度与入院家数,并下钻筛选。</p>';
@@ -7753,6 +7874,19 @@ function fcFyByKey(){
   }
   return map;
 }
+/* 全年指标 / YTD指标(AOP,按 医院code|产品)。
+   全年指标 = 12 个月 AOP 合计;YTD指标 = 后台「关账月」(S.fcCfg.actMonths)的 AOP 合计,随关账自动联动。
+   isQty=true 取数量(件),false 取金额(K)。无对应鞘预估行时该 key 不在 map 中。 */
+function fcAopByKey(isQty){
+  const act = new Set((S.fcCfg && S.fcCfg.actMonths) || []);
+  const map = {};
+  for(const e of fcBuildEntries()){
+    let fy=0, ytd=0;
+    for(let i=0;i<12;i++){ const v = isQty ? (e.aopQ[i]||0) : (e.aopA[i]||0); fy+=v; if(act.has(i+1)) ytd+=v; }
+    map[e.key] = { fy, ytd };
+  }
+  return map;
+}
 /* 入院状态(签约/进度/设备),供「月度预估」视图内联展示 */
 function admStatusByKey(){
   const map = {};
@@ -7764,7 +7898,7 @@ function admStepDone(st){ return st.signed ? st.step===3 : (st.step>=5); }
 function xhStatusChips(st){
   if(!st) return "";
   let s = '<div class="xh-row">';
-  s += '<span class="xh '+(st.signed?'xh-signed':'xh-unsigned')+'">'+(st.signed?'签约':'未签约')+'</span>';
+  s += '<span class="xh '+(st.signed?'xh-signed':'xh-unsigned')+'">'+(st.signed?'签约':'非签约')+'</span>';
   const sl = admStepLabel(st); if(sl) s += '<span class="xh xh-step'+(admStepDone(st)?' done':'')+'">'+esc(sl)+'</span>';
   if(st.equip) s += '<span class="xh xh-equip'+(/已入院/.test(st.equip)?' done':'')+'">'+esc(st.equip)+'</span>';
   return s + '</div>';
