@@ -6336,7 +6336,9 @@ function buildRows(){
   return S.base.map(r => {
     const k = rowKey(r);
     const f = S.fill[k] || {};
-    const step = f.step || 0;
+    /* 「未填写」已取消:耗材入院进度的基线 = 第1步(非签约→意向 / 签约→未入院)。
+       未填写或step为0的记录一律按第1步处理(下拉也不再提供「未填写」)。 */
+    const step = f.step || 1;
     return {
       ...r, key:k,
       step, equip:f.equip || "", layout:f.layout || "", blocker:f.blocker || "", note:f.note || "",
@@ -6347,7 +6349,7 @@ function buildRows(){
   });
 }
 function latestVersion(){ return S.versions.length ? S.versions[S.versions.length-1] : null; }
-function prevStepOf(key){ const v = latestVersion(); if (!v || !v.data || !v.data[key]) return null; return v.data[key].step || 0; }
+function prevStepOf(key){ const v = latestVersion(); if (!v || !v.data || !v.data[key]) return null; return v.data[key].step || 1; }   // 旧版本「未填写(0)」按基线第1步对待,避免误判为「有进展」
 
 /* 与上个版本对比: 返回 {kind:'adv'|'keep'|'back'|'dash', label} */
 function compareTag(row){
@@ -6486,13 +6488,13 @@ function renderCtx(){
   const rows = scopedRows();
   $("#zctx-cycle").textContent = S.base.length ? ("跟进表 · " + (S.baseMeta && S.baseMeta.sample ? "示例数据" : "已导入") + " " + S.base.length + " 条记录") : "尚未导入数据";
   $("#zctx-scope").textContent = "范围:" + scopeLabel();
-  const filled = rows.filter(r => r.step > 0).length;
+  const advanced = rows.filter(r => r.step >= 2).length;   // 已推进:超过基线第1步(意向/未入院)
   const entered = rows.filter(r => r.entered).length;
   const k = $("#zctx-kpis");
   if (!rows.length){ k.innerHTML = ""; return; }
   k.innerHTML =
     '<div class="ctx-kpi"><small>跟进记录</small><b>' + rows.length + '</b></div>' +
-    '<div class="ctx-kpi"><small>已填写</small><b>' + filled + '</b></div>' +
+    '<div class="ctx-kpi"><small>已推进</small><b>' + advanced + '</b><span class="sub" style="font-size:10px;color:var(--mute)">≥已试用</span></div>' +
     '<div class="ctx-kpi"><small>已入院/在用</small><b>' + entered + '</b></div>';
   renderWatermark();
   // 非管理员显示"修改密码"按钮
@@ -6578,8 +6580,8 @@ function stepOverviewHtml(rows){
     const ph = pd ? new Set(ents.filter(ppred).map(r=>r.hospCode)).size : null;
     return { hosp, ph };
   };
-  const SIGN_STEPS=[["未填写",s=>s===0],["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
-  const UNSIGN_STEPS=[["未填写",0],["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
+  const SIGN_STEPS=[["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
+  const UNSIGN_STEPS=[["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
   const LAY=["",...LAYOUT_OPTS]; const layLabel=v=>v||"未填写";
   const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
   const N=v=>fmtN(v), D=v=>'<span class="ov-dim">'+(v==null?"–":fmtN(v))+'</span>';
@@ -6812,8 +6814,10 @@ function setupFillVirtual(rows, cols, savedScrollTop){
 
 function stepCellTd(r, editable){
   const defs = stepDefs(r.contracted);
-  let s = '<td class="l"><select class="cell-sel'+(r.step?" set":"")+'" '+(editable?"":"disabled")+' data-fld="step" data-k="'+esc(r.key)+'"><option value="0">未填写</option>';
-  for (const d of defs) s += '<option value="'+d.v+'"'+(r.step===d.v?' selected':'')+'>'+esc(d.label)+'</option>';
+  /* 「未填写」选项已删除:基线 = 第1步(非签约→意向 / 签约→未入院);step 兜底为 1 见 buildRows */
+  const cur = r.step || 1;
+  let s = '<td class="l"><select class="cell-sel set" '+(editable?"":"disabled")+' data-fld="step" data-k="'+esc(r.key)+'">';
+  for (const d of defs) s += '<option value="'+d.v+'"'+(cur===d.v?' selected':'')+'>'+esc(d.label)+'</option>';
   return s + '</select></td>';
 }
 function progCellTd(r){
@@ -6962,24 +6966,29 @@ function renderDash(){
   if (!d.aopF) d.aopF = "all";
   if (!d.open) d.open = new Set();
   if (!d.sub)  d.sub  = new Set();
+  if (typeof d.volShow !== "boolean") d.volShow = false;   // 年化签约量/自由量默认隐藏(与筛选概览一致)
   const isQty = d.metric === "qty";
   const unit  = isQty ? "件" : "千元K";
 
-  // 全年指标/YTD指标/预估(按口径取金额a/数量q),按 医院code|产品 关联;YTD随后台关账月联动
-  const fcMap = {}, aopMap = {}, aopYtdMap = {};
+  // 26全年指标/26YTD指标/26YTD销量/26全年预估(按口径取金额a/数量q),按 医院code|产品 关联;YTD随后台关账月联动
+  const fcMap = {}, aopMap = {}, aopYtdMap = {}, ytdActMap = {};
   const actSet = new Set((S.fcCfg && S.fcCfg.actMonths) || []);
   for (const e of fcBuildEntries()){
-    let fc = 0, aop = 0, ytd = 0;
-    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av; if(actSet.has(i+1)) ytd+=av; }
-    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd;
+    let fc = 0, aop = 0, ytd = 0, ytdAct = 0;
+    for (let i=0;i<12;i++){
+      fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0);
+      const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av;
+      if(actSet.has(i+1)){ ytd+=av; ytdAct += isQty?(e.actQ[i]||0):(e.actA[i]||0); }
+    }
+    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd; ytdActMap[e.key]=ytdAct;
   }
-  // 聚合(主表与概览子表共用)
+  // 聚合(主表与概览子表共用):ytdAch=26YTD销量÷26YTD指标;ach=26全年预估÷26全年指标
   const dAgg = rs => {
     const hosp = new Set(rs.map(r=>r.hospCode)).size;
-    let cv=0, fv=0, aop=0, ytd=0, fc=0;
-    for (const r of rs){ cv+=(+r.contractVol||0); fv+=(+r.freeVol||0); aop+=aopMap[r.key]||0; ytd+=aopYtdMap[r.key]||0; fc+=fcMap[r.key]||0; }
+    let cv=0, fv=0, aop=0, ytd=0, ytdAct=0, fc=0;
+    for (const r of rs){ cv+=(+r.contractVol||0); fv+=(+r.freeVol||0); aop+=aopMap[r.key]||0; ytd+=aopYtdMap[r.key]||0; ytdAct+=ytdActMap[r.key]||0; fc+=fcMap[r.key]||0; }
     const inh = new Set(rs.filter(r=>r.entered).map(r=>r.hospCode)).size;
-    return { hosp, cv, fv, aop, ytd, fc, ach: aop>0?fc/aop:null, inh };
+    return { hosp, cv, fv, aop, ytd, ytdAct, ytdAch: ytd>0?ytdAct/ytd:null, fc, ach: aop>0?fc/aop:null, inh };
   };
 
   // 范围 + 共享下钻 + 顶部AOP筛选
@@ -6988,7 +6997,7 @@ function renderDash(){
   else if (d.aopF==="no") rows = rows.filter(r => !hasAopVol(r));
 
   // 顶部工具条:维度 / 口径 / AOP
-  let h = '<div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px"><b>📊 入院+预估看板</b><span class="hint">维度对比表 · 点行展开「筛选概览」明细 · 全年指标=FY全年AOP,YTD指标随后台关账月联动</span></div>';
+  let h = '<div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px"><b>📊 入院+预估看板</b><span class="hint">维度对比表 · 点行展开「筛选概览」明细 · 26全年=FY全年,26YTD/销量随后台关账月联动</span></div>';
   h += '<div class="toolbar" style="border-top:1px solid var(--line)">';
   h += '<div><div class="lbl">汇总维度</div><div class="seg" id="dd-dim">' +
     ["product","province","manager","region","rep"].map(k => '<button data-d="'+k+'" class="'+(d.dim===k?"on":"")+'">by '+DIMS[k].name+'</button>').join("") + '</div></div>';
@@ -7003,42 +7012,47 @@ function renderDash(){
   const groups = {};
   for (const r of rows){ const key = DIMS[d.dim].f(r) || "(未填)"; (groups[key] = groups[key] || []).push(r); }
   let gList = Object.keys(groups).map(k => ({ key:k, rs:groups[k], a:dAgg(groups[k]) }));
-  const sortVal = (g,id) => id==="dim" ? g.key : (g.a[id]==null ? (id==="ach"?-1:0) : g.a[id]);
+  const sortVal = (g,id) => id==="dim" ? g.key : (g.a[id]==null ? ((id==="ach"||id==="ytdAch")?-1:0) : g.a[id]);
   if (d.sort){
     const dir = d.sort.dir==="asc"?1:-1, id=d.sort.id;
     gList.sort((a,b)=>{ const x=sortVal(a,id), y=sortVal(b,id); if(typeof x==="string"||typeof y==="string")return String(x).localeCompare(String(y),"zh")*dir; return (x-y)*dir; });
   } else gList.sort((a,b)=> b.a.aop - a.a.aop);
 
   const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
+  const achTd = v => '<td class="num '+(achCls(v)?'ov-ach '+achCls(v):'')+'">'+(v==null?'–':(v*100).toFixed(1)+'%')+'</td>';
+  // 维度列单独处理(粘连+caret);其余列 col-driven,确保表头/数据行/合计行三处永远一致
   const cols = [
-    { id:"dim",  label:DIMS[d.dim].name, cls:"l stick1", w:150 },
-    { id:"hosp", label:"医院数",     w:74 },
-    { id:"cv",   label:"年化签约量", w:96 },
-    { id:"fv",   label:"年化自由量", w:96 },
-    { id:"aop",  label:"全年指标",   w:90 },
-    { id:"ytd",  label:"YTD指标",    w:90 },
-    { id:"fc",   label:"预估",       w:88 },
-    { id:"ach",  label:"达成率",     w:84 },
-    { id:"inh",  label:"入院家数",   w:84 }
+    { id:"hosp",   label:"医院数",        w:74, cell:a=>'<td class="num">'+a.hosp+'</td>' },
+    ...(d.volShow ? [
+      { id:"cv", label:"年化签约量", w:90, cell:a=>'<td class="num">'+fmtN(a.cv)+'</td>' },
+      { id:"fv", label:"年化自由量", w:90, cell:a=>'<td class="num">'+fmtN(a.fv)+'</td>' }
+    ] : []),
+    { id:"aop",    label:"26全年指标",     w:96,  cell:a=>'<td class="num">'+zFmtK(a.aop)+'</td>' },
+    { id:"ytd",    label:"26YTD指标",      w:96,  cell:a=>'<td class="num">'+zFmtK(a.ytd)+'</td>' },
+    { id:"ytdAct", label:"26YTD销量",      w:96,  cell:a=>'<td class="num">'+zFmtK(a.ytdAct)+'</td>' },
+    { id:"ytdAch", label:"YTD达成率%",     w:92,  cell:a=>achTd(a.ytdAch) },
+    { id:"fc",     label:"26全年预估",     w:96,  cell:a=>'<td class="num"><b>'+zFmtK(a.fc)+'</b></td>' },
+    { id:"ach",    label:"26全年预估达成率", w:124, cell:a=>achTd(a.ach) },
+    { id:"inh",    label:"入院家数",       w:84,  cell:a=>'<td class="num"><b>'+a.inh+'</b></td>' }
   ];
-  h += '<div class="card"><div class="card-h"><b>by ' + DIMS[d.dim].name + ' · 入院 + 预估</b><span class="hint">入院家数=已入院医院去重 · 点行展开筛选概览 · 点表头排序 · 单位:'+unit+'</span></div>';
+  const volBtn = '<button class="btn sm" data-ddvol style="margin-left:auto" title="展开/收起 年化签约量、年化自由量两列">'+(d.volShow?'− 收起年化量':'+ 年化签约/自由量')+'</button>';
+  const sortIco = id => { const on=d.sort&&d.sort.id===id; return '<span class="sort-ico">'+(on?(d.sort.dir==="asc"?"▲":"▼"):"⇅")+'</span>'; };
+  const sortCls = id => 'sortable'+(d.sort&&d.sort.id===id?" sorted":"");
+  h += '<div class="card"><div class="card-h"><b>by ' + DIMS[d.dim].name + ' · 入院 + 预估</b><span class="hint">入院家数=已入院医院去重 · 点行展开筛选概览 · 点表头排序 · 单位:'+unit+'</span>'+volBtn+'</div>';
   h += '<div class="twrap"><table class="dt" id="dd-tbl"><thead><tr>';
-  for (const c of cols){ const sorted = d.sort && d.sort.id===c.id; h += '<th class="'+(c.cls||"")+' sortable'+(sorted?" sorted":"")+'" data-cid="'+c.id+'"'+(c.w?' style="min-width:'+c.w+'px"':'')+'>'+c.label+'<span class="sort-ico">'+(sorted?(d.sort.dir==="asc"?"▲":"▼"):"⇅")+'</span></th>'; }
+  h += '<th class="l stick1 '+sortCls("dim")+'" data-cid="dim" style="min-width:150px">'+DIMS[d.dim].name+sortIco("dim")+'</th>';
+  for (const c of cols) h += '<th class="'+sortCls(c.id)+'" data-cid="'+c.id+'" style="min-width:'+c.w+'px">'+c.label+sortIco(c.id)+'</th>';
   h += '</tr></thead><tbody>';
   for (const g of gList){
     const a=g.a, open=d.open.has(g.key);
     h += '<tr class="grp-row'+(open?'':' collapsed')+'" data-dim="'+esc(g.key)+'">'+
       '<td class="l stick1"><span class="grp-caret">▾</span>'+esc(g.key)+'</td>'+
-      '<td class="num">'+a.hosp+'</td>'+
-      '<td class="num">'+fmtN(a.cv)+'</td><td class="num">'+fmtN(a.fv)+'</td>'+
-      '<td class="num">'+zFmtK(a.aop)+'</td><td class="num">'+zFmtK(a.ytd)+'</td><td class="num"><b>'+zFmtK(a.fc)+'</b></td>'+
-      '<td class="num '+(achCls(a.ach)?'ov-ach '+achCls(a.ach):'')+'">'+(a.ach==null?'–':(a.ach*100).toFixed(1)+'%')+'</td>'+
-      '<td class="num"><b>'+a.inh+'</b></td></tr>';
-    if (open) h += '<tr><td class="dd-det" colspan="'+cols.length+'">'+ddOverview(g.rs, g.key, dAgg, isQty)+'</td></tr>';
+      cols.map(c=>c.cell(a)).join('')+'</tr>';
+    if (open) h += '<tr><td class="dd-det" colspan="'+(cols.length+1)+'">'+ddOverview(g.rs, g.key, dAgg, isQty)+'</td></tr>';
   }
   // 合计
   const tot = dAgg(rows);
-  h += '<tr class="total-row"><td class="l stick1">合计</td><td class="num">'+tot.hosp+'</td><td class="num">'+fmtN(tot.cv)+'</td><td class="num">'+fmtN(tot.fv)+'</td><td class="num">'+zFmtK(tot.aop)+'</td><td class="num">'+zFmtK(tot.ytd)+'</td><td class="num"><b>'+zFmtK(tot.fc)+'</b></td><td class="num '+(achCls(tot.ach)?'ov-ach '+achCls(tot.ach):'')+'">'+(tot.ach==null?'–':(tot.ach*100).toFixed(1)+'%')+'</td><td class="num"><b>'+tot.inh+'</b></td></tr>';
+  h += '<tr class="total-row"><td class="l stick1">合计</td>'+cols.map(c=>c.cell(tot)).join('')+'</tr>';
   h += '</tbody></table></div></div>';
 
   host.innerHTML = h;
@@ -7048,6 +7062,7 @@ function renderDash(){
 function ddOverview(rs, dimVal, dAgg, isQty){
   const d = S.dash;
   const achCls=v=>v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low");
+  const ovAchTd = v => '<td class="num '+(achCls(v)?'ov-ach '+achCls(v):'')+'">'+(v==null?'–':(v*100).toFixed(1)+'%')+'</td>';
   const ovRow = (label, c, o={}) => {
     const expId=o.expId, open=expId&&d.sub.has(expId);
     const car=expId?'<span class="ov-car">▸</span>':'';
@@ -7056,12 +7071,13 @@ function ddOverview(rs, dimVal, dAgg, isQty){
     return '<tr'+(cls?' class="'+cls+'"':'')+(expId?' data-ovexp="'+esc(expId)+'"':'')+'>'+
       '<td class="l"'+pad+'>'+car+esc(label)+'</td>'+
       '<td class="num">'+fmtN(c.hosp)+'</td>'+
-      '<td class="num">'+fmtN(c.cv)+'</td><td class="num">'+fmtN(c.fv)+'</td>'+
-      '<td class="num">'+zFmtK(c.aop)+'</td><td class="num">'+zFmtK(c.ytd)+'</td><td class="num"><b>'+zFmtK(c.fc)+'</b></td>'+
-      '<td class="num '+(achCls(c.ach)?'ov-ach '+achCls(c.ach):'')+'">'+(c.ach==null?'–':(c.ach*100).toFixed(1)+'%')+'</td></tr>';
+      (d.volShow ? ('<td class="num">'+fmtN(c.cv)+'</td><td class="num">'+fmtN(c.fv)+'</td>') : '')+
+      '<td class="num">'+zFmtK(c.aop)+'</td><td class="num">'+zFmtK(c.ytd)+'</td>'+
+      '<td class="num">'+zFmtK(c.ytdAct)+'</td>'+ovAchTd(c.ytdAch)+
+      '<td class="num"><b>'+zFmtK(c.fc)+'</b></td>'+ovAchTd(c.ach)+'</tr>';
   };
-  const SIGN_STEPS=[["未填写",s=>s===0],["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
-  const UNSIGN_STEPS=[["未填写",0],["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
+  const SIGN_STEPS=[["未入院",s=>s===1],["已试用",s=>s===2],["已入院",s=>s>=3]];
+  const UNSIGN_STEPS=[["意向",1],["已试用",2],["已提单",3],["已过会",4],["已入院",5],["临采",6]];
   const LAY=["",...LAYOUT_OPTS];
   const miniTable = (gr, signed, byLayout) => {
     const total = new Set(gr.map(r=>r.hospCode)).size;
@@ -7077,7 +7093,7 @@ function ddOverview(rs, dimVal, dAgg, isQty){
     const n=new Set(gr.map(r=>r.hospCode)).size;
     let inner='<div class="ovdw"><div class="ovh"><div class="ovh-t">按耗材入院进展 <span class="tg">'+n+' 家</span></div>'+miniTable(gr,signed,false)+'</div>';
     inner += '<div class="ovh"><div class="ovh-t">按设备布局状态 <span class="tg">'+n+' 家 · 仅ZSR</span></div>'+miniTable(gr,signed,true)+'</div></div>';
-    return '<tr class="ovdet"><td colspan="8">'+inner+'</td></tr>';
+    return '<tr class="ovdet"><td colspan="'+(d.volShow?10:8)+'">'+inner+'</td></tr>';
   };
   const aopGroup = (label, hasPred, kp) => {
     const sub = rs.filter(hasPred);
@@ -7091,7 +7107,9 @@ function ddOverview(rs, dimVal, dAgg, isQty){
     return g;
   };
   let h = '<div style="padding:10px 14px 12px"><div class="det-cap">▾ '+esc(dimVal)+' · 筛选概览明细(by '+DIMS[d.dim].name+' · 单位'+(isQty?'件':'千元K')+')</div>';
-  h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>全年指标</th><th>YTD指标</th><th>预估</th><th>达成率</th></tr></thead><tbody>';
+  h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th>'+
+    (d.volShow?'<th>年化签约量</th><th>年化自由量</th>':'')+
+    '<th>26全年指标</th><th>26YTD指标</th><th>26YTD销量</th><th>YTD达成率%</th><th>26全年预估</th><th>26全年预估达成率</th></tr></thead><tbody>';
   h += ovRow("区域内总医院", dAgg(rs), {cls:"ovtop"});
   h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
   h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
@@ -7102,6 +7120,8 @@ function bindDashNew(){
   $("#dd-dim").onclick    = e => { const b=e.target.closest("button"); if(b){ d.dim=b.dataset.d; d.sort=null; d.open.clear(); d.sub.clear(); renderDash(); } };
   $("#dd-metric").onclick = e => { const b=e.target.closest("button"); if(b&&!b.disabled){ d.metric=b.dataset.m; renderDash(); } };
   $("#dd-aop").onclick    = e => { const b=e.target.closest("button"); if(b){ d.aopF=b.dataset.a; renderDash(); } };
+  const vb = document.querySelector('#ztab-dash [data-ddvol]');
+  if (vb) vb.onclick = () => { d.volShow = !d.volShow; renderDash(); };
   bindZDrill(renderDash);   // ★ 共享下钻(四界面联动)
   const tbl = $("#dd-tbl");
   if (tbl) tbl.addEventListener("click", e => {
@@ -7380,7 +7400,7 @@ function renderAdmin(){
   h += '<div class="kpis" style="padding:0 0 14px">' +
     kpi("医院数", new Set(S.base.map(r=>r.hospCode)).size, "") +
     kpi("记录数", S.base.length, "医院×产品") +
-    kpi("已填写", rows.filter(r=>r.step>0).length, "") +
+    kpi("已推进", rows.filter(r=>r.step>=2).length, "≥已试用") +
     kpi("历史版本", S.versions.length, "用于对比") +
     '</div>';
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
@@ -7464,7 +7484,7 @@ function bindAdmin(){
     const fcA={}, fcQ={};
     for (const e of fcBuildEntries()){ let a=0,q=0; for (let i=0;i<12;i++){ a+=(e.m[i]&&e.m[i].a)||0; q+=(e.m[i]&&e.m[i].q)||0; } fcA[e.key]=a; fcQ[e.key]=q; }
     const data = {};
-    for (const r of buildRows()){ const k = r.key, f = S.fill[k] || {}; data[k] = { step:f.step||0, equip:f.equip||"", layout:f.layout||"", note:f.note||"", fy: fcA[k]||0, fyq: fcQ[k]||0 }; }
+    for (const r of buildRows()){ const k = r.key, f = S.fill[k] || {}; data[k] = { step:r.step, equip:f.equip||"", layout:f.layout||"", note:f.note||"", fy: fcA[k]||0, fyq: fcQ[k]||0 }; }
     S.versions.push({ id:uid(), label, ts:Date.now(), data });
     await saveVersions(); toast("已保存版本:" + label); renderAdmin();
   };
