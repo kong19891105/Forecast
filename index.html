@@ -6532,7 +6532,8 @@ function filteredStepRows(all){
    「上一次/上个版本」取最近一个已保存版本(快照已附 step/layout/预估FY/预估件数);无版本显示 –。 */
 let _ovOpen = new Set();   // 展开的 签约/非签约 行(内存,默认收起)
 let _ovBound = false;
-let _fillAopMap = {};      // 填写表「全年/YTD指标」缓存(金额K),供排序复用;renderFill 时刷新
+let _ovVolShow = false;    // 概览「年化签约量/年化自由量」两列是否展开(默认隐藏,点开关显示)
+let _fillAopMap = {};      // 填写表「全年/YTD指标/销量」缓存,供排序复用;renderFill 时按金额↔数量口径刷新
 const OV_SIDES = [
   { k:"zsr",   title:"ZSR测压鞘", cls:"zsr",   pred:r=>isZsrProd(r.product),  hasLayout:true },
   { k:"anrei", title:"Anrei鞘",   cls:"anrei", pred:r=>isAnreiProd(r.product), hasLayout:false }
@@ -6545,12 +6546,16 @@ function stepOverviewHtml(rows){
   const isQty = metric==="qty";
   const unit = isQty ? "件" : "千元K";
   // 预估/指标:按口径(数量 q / 金额 a)取值
-  const fcMap={}, aopMap={}, aopYtdMap={};
-  const actSet = new Set((S.fcCfg && S.fcCfg.actMonths) || []);   // 后台关账月 → YTD指标
+  const fcMap={}, aopMap={}, aopYtdMap={}, ytdActMap={};
+  const actSet = new Set((S.fcCfg && S.fcCfg.actMonths) || []);   // 后台关账月 → YTD指标 / YTD销量
   for (const e of fcBuildEntries()){
-    let fc=0, aop=0, ytd=0;
-    for (let i=0;i<12;i++){ fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0); const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av; if(actSet.has(i+1)) ytd+=av; }
-    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd;
+    let fc=0, aop=0, ytd=0, ytdAct=0;
+    for (let i=0;i<12;i++){
+      fc += isQty?((e.m[i]&&e.m[i].q)||0):((e.m[i]&&e.m[i].a)||0);
+      const av=isQty?(e.aopQ[i]||0):(e.aopA[i]||0); aop+=av;
+      if(actSet.has(i+1)){ ytd+=av; ytdAct += isQty?(e.actQ[i]||0):(e.actA[i]||0); }
+    }
+    fcMap[e.key]=fc; aopMap[e.key]=aop; aopYtdMap[e.key]=ytd; ytdActMap[e.key]=ytdAct;
   }
   const ver = latestVersion();
   const pd = ver && ver.data ? ver.data : null;
@@ -6562,10 +6567,10 @@ function stepOverviewHtml(rows){
   const calcSum = (ents, pred, ppred) => {
     const cur = ents.filter(pred);
     const hosp = new Set(cur.map(r=>r.hospCode)).size;
-    let aop=0, ytd=0, fc=0, cv=0, fv=0; for (const r of cur){ aop += aopMap[r.key]||0; ytd += aopYtdMap[r.key]||0; fc += fcMap[r.key]||0; cv += (+r.contractVol||0); fv += (+r.freeVol||0); }
+    let aop=0, ytd=0, ytdAct=0, fc=0, cv=0, fv=0; for (const r of cur){ aop += aopMap[r.key]||0; ytd += aopYtdMap[r.key]||0; ytdAct += ytdActMap[r.key]||0; fc += fcMap[r.key]||0; cv += (+r.contractVol||0); fv += (+r.freeVol||0); }
     let ph=null, pf=null;
     if (pd){ const pr=ents.filter(ppred); ph=new Set(pr.map(r=>r.hospCode)).size; pf=0; for (const r of pr) pf += pFc(r.key); }
-    return { hosp, cv, fv, aop, ytd, fc, ach: aop>0?fc/aop:null, ph, pf };
+    return { hosp, cv, fv, aop, ytd, ytdAct, ytdAch: ytd>0?ytdAct/ytd:null, fc, ach: aop>0?fc/aop:null, ph, pf };
   };
   // 分布行(仅家数)
   const cnt = (ents, pred, ppred) => {
@@ -6607,8 +6612,10 @@ function stepOverviewHtml(rows){
       return '<tr'+(cls?' class="'+cls+'"':'')+(expId?' data-ovexp="'+expId+'"':'')+'>'+
         '<td class="l"'+pad+'>'+car+esc(label)+'</td>'+
         '<td class="num">'+N(c.hosp)+'</td>'+
-        '<td class="num">'+N(c.cv)+'</td><td class="num">'+N(c.fv)+'</td>'+
+        (_ovVolShow ? ('<td class="num">'+N(c.cv)+'</td><td class="num">'+N(c.fv)+'</td>') : '')+
         '<td class="num">'+N(c.aop)+'</td><td class="num">'+N(c.ytd)+'</td>'+
+        '<td class="num">'+N(c.ytdAct)+'</td>'+
+        '<td class="num ov-ach '+achCls(c.ytdAch)+'">'+(c.ytdAch==null?'–':(c.ytdAch*100).toFixed(1)+'%')+'</td>'+
         '<td class="num"><b>'+N(c.fc)+'</b></td>'+
         '<td class="num ov-ach '+achCls(c.ach)+'">'+(c.ach==null?'–':(c.ach*100).toFixed(1)+'%')+'</td>'+
         '<td class="num">'+D(c.ph)+'</td>'+
@@ -6621,7 +6628,7 @@ function stepOverviewHtml(rows){
       let inner='<div class="ovdw"><div class="ovh"><div class="ovh-t">按耗材入院进展 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, false)+'</div>';
       inner += side.hasLayout ? ('<div class="ovh"><div class="ovh-t">按设备布局状态 <span class="tg">'+n+' 家</span></div>'+miniTable(gr, signed, true)+'</div>') : '<div class="ovh ovh-empty">安瑞鞘无设备布局状态</div>';
       inner += '</div>';
-      return '<tr class="ovdet"><td colspan="10">'+inner+'</td></tr>';
+      return '<tr class="ovdet"><td colspan="'+(_ovVolShow?12:10)+'">'+inner+'</td></tr>';
     };
     // 一个 AOP 分组(有/无)下的:小计行 + 签约/非签约(可展开)
     const aopGroup = (label, hasPred, kpfx) => {
@@ -6635,7 +6642,9 @@ function stepOverviewHtml(rows){
       return g;
     };
     let h = '<div class="ov-prod '+side.cls+'"><div class="ov-pbar"><span class="ov-pt">'+esc(side.title)+'</span><span class="hint">单位:'+unit+'</span></div>';
-    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>26全年指标</th><th>26YTD指标</th><th>26全年预估</th><th>26全年达成率</th><th>上一次填写医院数</th><th>上一次预估数</th></tr></thead><tbody>';
+    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th>'+
+      (_ovVolShow ? '<th>年化签约量</th><th>年化自由量</th>' : '')+
+      '<th>26全年指标</th><th>26YTD指标</th><th>26YTD销量</th><th>YTD达成率%</th><th>26全年预估</th><th>26全年预估达成率</th><th>上一次填写医院数</th><th>上一次预估数</th></tr></thead><tbody>';
     h += sumRow("区域内总医院", calcSum(ents, ()=>true, ()=>true), {cls:"ovtop"});
     h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
     h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
@@ -6643,7 +6652,8 @@ function stepOverviewHtml(rows){
   }
   let h = '<div class="card" id="step-kpi-box"><div class="card-h"><b>📊 筛选概览</b><span class="hint">'+
     (pd?'随筛选与填写实时联动 · 「上一次」对比最近版本':'随筛选与填写实时联动 · 暂无历史版本(保存版本后「上一次」两列才有值)')+'</span>'+
-    '<span class="ov-metseg"><button data-ovmetric="qty" class="'+(isQty?'on':'')+'"'+(hasQty?'':' disabled title="无数量数据"')+'>数量</button><button data-ovmetric="amt" class="'+(!isQty?'on':'')+'">金额K</button></span></div>';
+    '<button class="btn sm" data-ovvol style="margin-left:auto" title="展开/收起 年化签约量、年化自由量两列">'+(_ovVolShow?'− 收起年化量':'+ 年化签约/自由量')+'</button>'+
+    '<span class="ov-metseg" style="margin-left:8px"><button data-ovmetric="qty" class="'+(isQty?'on':'')+'"'+(hasQty?'':' disabled title="无数量数据"')+'>数量</button><button data-ovmetric="amt" class="'+(!isQty?'on':'')+'">金额K</button></span></div>';
   h += OV_SIDES.map(prodBlock).join("");
   return h + '</div>';
 }
@@ -6653,8 +6663,15 @@ function bindStepOverview(){
   document.addEventListener("click", e => {
     const ex = e.target.closest('[data-ovexp]');
     if (ex){ const id=ex.getAttribute('data-ovexp'); _ovOpen.has(id)?_ovOpen.delete(id):_ovOpen.add(id); refreshStepKpi(); return; }
+    const vol = e.target.closest('[data-ovvol]');
+    if (vol){ _ovVolShow = !_ovVolShow; refreshStepKpi(); return; }
     const mt = e.target.closest('[data-ovmetric]');
-    if (mt && !mt.disabled){ setOvMetric(mt.getAttribute('data-ovmetric')); refreshStepKpi(); }
+    if (mt && !mt.disabled){
+      setOvMetric(mt.getAttribute('data-ovmetric'));
+      // 金额↔数量切换:概览 + 下方填写表的「指标/销量」列一起联动(重渲染整页)
+      if (typeof renderFill==="function" && S.tab==="fill" && S.fillView!=="fc") renderFill();
+      else refreshStepKpi();
+    }
   });
 }
 /* 仅刷新概览盒(不重渲染整表),供填写单元格即时变更后实时联动 */
@@ -6694,8 +6711,10 @@ function renderFill(){
 
   // 行内交叉提示:该院该产品的「月度预估FY」金额(K),供医院列内联展示
   const FCFY = (S.fcBase && S.fcBase.length) ? fcFyByKey() : null;
-  // 全年指标 / YTD指标(金额K,按 医院code|产品 关联鞘预估AOP;YTD随后台关账月联动),供新列展示与排序
-  _fillAopMap = (S.fcBase && S.fcBase.length) ? fcAopByKey(false) : {};
+  // 26全年指标 / 26YTD指标 / YTD实际销量:口径随概览顶部「金额K↔数量」按钮联动(无数量数据则锁金额)
+  const fillIsQty = ovMetric()==="qty" && !!(S.fcCfg && S.fcCfg.hasQty);
+  const aopUnit = fillIsQty ? "件" : "K";
+  _fillAopMap = (S.fcBase && S.fcBase.length) ? fcAopByKey(fillIsQty) : {};
 
   // 表格列定义(全部)
   const allCols = [
@@ -6708,9 +6727,9 @@ function renderFill(){
     { id:"status",   label:"签约",   cls:"c", w:62,  sv:r=>r.contracted?1:0, td:r=>'<td class="c"><span class="tag '+(r.contracted?"signed":"unsigned")+'">'+(r.contracted?"签约":"非签约")+'</span></td>' },
     { id:"cv",       label:"年化签约量",cls:"", w:84, sv:r=>r.contractVol, td:r=>'<td class="num dim">'+fmtN(r.contractVol)+'</td>' },
     { id:"fv",       label:"年化自由量",cls:"", w:84, sv:r=>r.freeVol,     td:r=>'<td class="num dim">'+fmtN(r.freeVol)+'</td>' },
-    { id:"fyAop",    label:"26全年指标(K)",cls:"", w:106, sv:r=>(_fillAopMap[rowKey(r)]||{}).fy||0,  td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 全年AOP指标(金额K)">'+(a?fmtN(a.fy):'–')+'</td>'; } },
-    { id:"ytdAop",   label:"26YTD指标(K)",cls:"", w:106, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytd||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 YTD AOP指标(金额K,随后台关账月联动)">'+(a?fmtN(a.ytd):'–')+'</td>'; } },
-    { id:"ytdAct",   label:"YTD实际销量(K)",cls:"", w:114, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytdAct||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num" title="YTD 实际销量(金额K,关账月实际合计,随后台关账月联动)">'+(a?fmtN(a.ytdAct):'–')+'</td>'; } },
+    { id:"fyAop",    label:"26全年指标("+aopUnit+")",cls:"", w:108, sv:r=>(_fillAopMap[rowKey(r)]||{}).fy||0,  td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 全年AOP指标(单位'+aopUnit+')">'+(a?fmtN(a.fy):'–')+'</td>'; } },
+    { id:"ytdAop",   label:"26YTD指标("+aopUnit+")",cls:"", w:108, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytd||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 YTD AOP指标(单位'+aopUnit+',随后台关账月联动)">'+(a?fmtN(a.ytd):'–')+'</td>'; } },
+    { id:"ytdAct",   label:"YTD实际销量("+aopUnit+")",cls:"", w:116, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytdAct||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num" title="YTD 实际销量(单位'+aopUnit+',关账月实际合计,随后台关账月联动)">'+(a?fmtN(a.ytdAct):'–')+'</td>'; } },
     { id:"ytdAch",   label:"YTD达成率",cls:"", w:96, sv:r=>{ const a=_fillAopMap[rowKey(r)]; return a&&a.ytdAch!=null?a.ytdAch:-1; }, td:r=>{ const a=_fillAopMap[rowKey(r)]; const v=a?a.ytdAch:null; const cls=v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low"); return '<td class="num ov-ach '+cls+'" title="YTD达成率 = YTD实际销量 ÷ 26YTD指标">'+(v==null?'–':(v*100).toFixed(1)+'%')+'</td>'; } },
     { id:"step",     label:"耗材入院进度(选择)",cls:"l", w:158, sv:r=>r.step, td:r=>stepCellTd(r, editable) },
     { id:"layout",   label:"设备布局状态",cls:"l", w:152, sv:r=>r.layout, td:r=>layoutCellTd(r, editable) },
@@ -6729,7 +6748,7 @@ function renderFill(){
 
   // 工具条:搜索 + 显示字段
   const colToggleLabel = (id) => {
-    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', fyAop:'26全年指标(K)', ytdAop:'26YTD指标(K)', ytdAct:'YTD实际销量(K)', ytdAch:'YTD达成率', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
+    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', fyAop:'26全年指标('+aopUnit+')', ytdAop:'26YTD指标('+aopUnit+')', ytdAct:'YTD实际销量('+aopUnit+')', ytdAch:'YTD达成率', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
     return map[id] || id;
   };
   h += '<div class="toolbar">';
