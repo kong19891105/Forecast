@@ -6635,7 +6635,7 @@ function stepOverviewHtml(rows){
       return g;
     };
     let h = '<div class="ov-prod '+side.cls+'"><div class="ov-pbar"><span class="ov-pt">'+esc(side.title)+'</span><span class="hint">单位:'+unit+'</span></div>';
-    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>全年指标</th><th>YTD指标</th><th>预估</th><th>达成率</th><th>上一次填写医院数</th><th>上一次预估数</th></tr></thead><tbody>';
+    h += '<table class="ovt"><thead><tr><th class="l">项目</th><th>医院数</th><th>年化签约量</th><th>年化自由量</th><th>26全年指标</th><th>26YTD指标</th><th>26全年预估</th><th>26全年达成率</th><th>上一次填写医院数</th><th>上一次预估数</th></tr></thead><tbody>';
     h += sumRow("区域内总医院", calcSum(ents, ()=>true, ()=>true), {cls:"ovtop"});
     h += aopGroup("有AOP(指标)医院", r=>hasAopVol(r), "aop");
     h += aopGroup("无AOP(指标)医院", r=>!hasAopVol(r), "noaop");
@@ -6708,8 +6708,10 @@ function renderFill(){
     { id:"status",   label:"签约",   cls:"c", w:62,  sv:r=>r.contracted?1:0, td:r=>'<td class="c"><span class="tag '+(r.contracted?"signed":"unsigned")+'">'+(r.contracted?"签约":"非签约")+'</span></td>' },
     { id:"cv",       label:"年化签约量",cls:"", w:84, sv:r=>r.contractVol, td:r=>'<td class="num dim">'+fmtN(r.contractVol)+'</td>' },
     { id:"fv",       label:"年化自由量",cls:"", w:84, sv:r=>r.freeVol,     td:r=>'<td class="num dim">'+fmtN(r.freeVol)+'</td>' },
-    { id:"fyAop",    label:"全年指标(K)",cls:"", w:92, sv:r=>(_fillAopMap[rowKey(r)]||{}).fy||0,  td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="全年AOP指标(金额K)">'+(a?fmtN(a.fy):'–')+'</td>'; } },
-    { id:"ytdAop",   label:"YTD指标(K)",cls:"", w:92, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytd||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="YTD AOP指标(金额K,随后台关账月联动)">'+(a?fmtN(a.ytd):'–')+'</td>'; } },
+    { id:"fyAop",    label:"26全年指标(K)",cls:"", w:106, sv:r=>(_fillAopMap[rowKey(r)]||{}).fy||0,  td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 全年AOP指标(金额K)">'+(a?fmtN(a.fy):'–')+'</td>'; } },
+    { id:"ytdAop",   label:"26YTD指标(K)",cls:"", w:106, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytd||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num dim" title="2026 YTD AOP指标(金额K,随后台关账月联动)">'+(a?fmtN(a.ytd):'–')+'</td>'; } },
+    { id:"ytdAct",   label:"YTD实际销量(K)",cls:"", w:114, sv:r=>(_fillAopMap[rowKey(r)]||{}).ytdAct||0, td:r=>{ const a=_fillAopMap[rowKey(r)]; return '<td class="num" title="YTD 实际销量(金额K,关账月实际合计,随后台关账月联动)">'+(a?fmtN(a.ytdAct):'–')+'</td>'; } },
+    { id:"ytdAch",   label:"YTD达成率",cls:"", w:96, sv:r=>{ const a=_fillAopMap[rowKey(r)]; return a&&a.ytdAch!=null?a.ytdAch:-1; }, td:r=>{ const a=_fillAopMap[rowKey(r)]; const v=a?a.ytdAch:null; const cls=v==null?"":v>=0.9?"good":(v>=0.8?"mid":"low"); return '<td class="num ov-ach '+cls+'" title="YTD达成率 = YTD实际销量 ÷ 26YTD指标">'+(v==null?'–':(v*100).toFixed(1)+'%')+'</td>'; } },
     { id:"step",     label:"耗材入院进度(选择)",cls:"l", w:158, sv:r=>r.step, td:r=>stepCellTd(r, editable) },
     { id:"layout",   label:"设备布局状态",cls:"l", w:152, sv:r=>r.layout, td:r=>layoutCellTd(r, editable) },
     { id:"pct",      label:"入院进度",cls:"l", w:150, sv:r=>(r.pct!=null?r.pct:(r.step===6?1.01:(r.contracted?(r.step/3):-1))), td:r=>progCellTd(r) },
@@ -6727,7 +6729,7 @@ function renderFill(){
 
   // 工具条:搜索 + 显示字段
   const colToggleLabel = (id) => {
-    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', fyAop:'全年指标(K)', ytdAop:'YTD指标(K)', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
+    const map = { region:'大区', manager:'经理', rep:'代表', province:'省份', hosp:'医院名称', product:'产品', status:'签约', cv:'年化签约量', fv:'年化自由量', fyAop:'26全年指标(K)', ytdAop:'26YTD指标(K)', ytdAct:'YTD实际销量(K)', ytdAch:'YTD达成率', step:'耗材入院进度(选择)', layout:'设备布局状态', pct:'入院进度', cmp:'对比上版', equip:'ZSR设备计划(选填)', note:'管理者备注' };
     return map[id] || id;
   };
   h += '<div class="toolbar">';
@@ -6836,6 +6838,8 @@ function layoutCellTd(r, editable){
 function sortValFill(r, id){
   if (id==="fyAop")  return (_fillAopMap[rowKey(r)]||{}).fy  || 0;
   if (id==="ytdAop") return (_fillAopMap[rowKey(r)]||{}).ytd || 0;
+  if (id==="ytdAct") return (_fillAopMap[rowKey(r)]||{}).ytdAct || 0;
+  if (id==="ytdAch") { const a=_fillAopMap[rowKey(r)]; return a&&a.ytdAch!=null?a.ytdAch:-1; }
   const map = { region:r.region, manager:r.manager, rep:r.rep, province:r.province, hosp:r.hospName, product:r.product,
     status:r.contracted?1:0, cv:r.contractVol, fv:r.freeVol, step:r.step,
     layout:r.layout,
@@ -7874,16 +7878,20 @@ function fcFyByKey(){
   }
   return map;
 }
-/* 全年指标 / YTD指标(AOP,按 医院code|产品)。
-   全年指标 = 12 个月 AOP 合计;YTD指标 = 后台「关账月」(S.fcCfg.actMonths)的 AOP 合计,随关账自动联动。
+/* 26全年指标 / 26YTD指标 / YTD实际销量 / YTD达成率(按 医院code|产品)。
+   全年指标 = 12 个月 AOP 合计;YTD指标 = 后台「关账月」(S.fcCfg.actMonths)的 AOP 合计;
+   YTD实际销量 = 关账月的「实际」合计(actA/actQ);YTD达成率 = YTD实际销量 ÷ YTD指标。三者均随关账月自动联动。
    isQty=true 取数量(件),false 取金额(K)。无对应鞘预估行时该 key 不在 map 中。 */
 function fcAopByKey(isQty){
   const act = new Set((S.fcCfg && S.fcCfg.actMonths) || []);
   const map = {};
   for(const e of fcBuildEntries()){
-    let fy=0, ytd=0;
-    for(let i=0;i<12;i++){ const v = isQty ? (e.aopQ[i]||0) : (e.aopA[i]||0); fy+=v; if(act.has(i+1)) ytd+=v; }
-    map[e.key] = { fy, ytd };
+    let fy=0, ytd=0, ytdAct=0;
+    for(let i=0;i<12;i++){
+      const v = isQty ? (e.aopQ[i]||0) : (e.aopA[i]||0); fy+=v;
+      if(act.has(i+1)){ ytd+=v; ytdAct += isQty ? (e.actQ[i]||0) : (e.actA[i]||0); }
+    }
+    map[e.key] = { fy, ytd, ytdAct, ytdAch: ytd>0 ? ytdAct/ytd : null };
   }
   return map;
 }
