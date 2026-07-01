@@ -1401,6 +1401,21 @@ async function primeLatestVerCache() {
   const vs = (S.cfg && S.cfg.versions) || [];
   if (vs.length) { const last = vs[vs.length - 1]; if (!S.verCache.has(last.id)) await getVersion(last.id); }
 }
+/* 填写页「对比版本」解析:优先级 个人选择(S.fillCmp) > 管理员默认(S.cfg.fillCmpDefault) > 自动(cmpVerMeta)。
+   取值:""=不对比 / "latest"=自动(最近一个与当前不同的版本) / "{id}"=指定版本 / "__def__"或空=跟随管理员默认。 */
+function fillCmpEffId() {
+  const sel = (S.fillCmp == null) ? "__def__" : S.fillCmp;
+  if (sel !== "__def__") return sel;
+  return (S.cfg && S.cfg.fillCmpDefault != null) ? S.cfg.fillCmpDefault : "latest";
+}
+async function resolveFillCmpVer() {
+  const eff = fillCmpEffId();
+  if (eff === "") return null;                                  // 不对比
+  if (eff === "latest") { const lv = cmpVerMeta(); return lv ? await getVersion(lv.id) : null; }
+  const vm = ((S.cfg && S.cfg.versions) || []).find(v => v.id === eff);
+  if (vm) return await getVersion(eff);                         // 指定版本
+  const lv = cmpVerMeta(); return lv ? await getVersion(lv.id) : null;  // 指定版本已删 → 回退自动
+}
 
 /* =================== 计算核心 =================== */
 function rowASP(r) {
@@ -1433,10 +1448,13 @@ function periodLabel(p) {
   if (p && p.startsWith("YTD-")) { const n = parseInt(p.slice(4)); return "YTD" + n + "月"; }
   const d = PERIODS.find(x => x.key === p); return d ? d.label : p; 
 }
-function periodShort(p) { 
+function periodShort(p) {
   if (p && p.startsWith("YTD-")) { const n = parseInt(p.slice(4)); return "YTD" + n; }
-  return p === "FY" ? "FY" : p; 
+  return p === "FY" ? "FY" : p;
 }
+/* YTD 默认截止月 = 最大关账月(无则 12)。全局统一:填写页/看板/报表的「YTD」默认都到"最后一个关账月",
+   与填写页顶部「YTD实际达成」KPI(按关账月合计)口径一致,避免同一代表 YTD AOP 在两处对不上。 */
+function ytdCutMonth() { const am = (S.cfg && S.cfg.actMonths) || []; return am.length ? Math.max(...am) : 12; }
 function calcEntryPeriod(e, p) {
   const ms = getPeriodMonths(p);
   let fy = 0, fyq = 0, aop = 0, aopQ = 0, ly = 0, lyQ = 0, openTotal = 0, openFilled = 0;
@@ -1952,8 +1970,7 @@ async function renderFill() {
      省份/产品视图为混合范围,页面仍标记为管理视图,但逐行写入由 rowMgrEdit 判定(自己辖区行仍走正式提交)。 */
   const viewingOwn = S.me && S.me.role !== "admin" && (S.fillMode === "rep" || !S.fillMode) && S.curRep === S.me.name;
   const mvFill = !lockRep && isMgrView() && !viewingOwn;
-  const lv = cmpVerMeta();
-  const ver = lv ? await getVersion(lv.id) : null;
+  const ver = await resolveFillCmpVer();   // 对比版本:个人选择 > 管理员默认 > 自动
   const actSet = new Set(S.cfg.actMonths);
 
   // 先计算权限范围内的数据，供筛选器和后续使用
@@ -2111,9 +2128,20 @@ async function renderFill() {
   const pLabel = periodLabel(S.period);
   const pShort = periodShort(S.period);
   const mob = isMobile();
+  /* 对比版本下拉:默认跟随管理员在后台设定的基准,用户可自行改成任意版本 / 自动 / 不对比 */
+  const _fcDefEff = (S.cfg && S.cfg.fillCmpDefault != null) ? S.cfg.fillCmpDefault : "latest";
+  const _fcDefLbl = _fcDefEff === "" ? "不对比" : _fcDefEff === "latest" ? "自动·最近不同版本" : (((S.cfg && S.cfg.versions) || []).find(v => v.id === _fcDefEff) || {}).label || "已删除版本→自动";
+  const _fcCur = (S.fillCmp == null) ? "__def__" : S.fillCmp;
+  const cmpSelHtml = '<select class="ctrl" id="fill-cmp-sel" style="min-width:168px;margin-left:4px" title="选择本页 KPI 与小计跟哪个版本对比。默认跟随管理员在后台的统一设定,你也可以自己改,只影响你自己的视图。">' +
+    '<option value="__def__"' + (_fcCur === "__def__" ? " selected" : "") + '>对比:默认(' + esc(_fcDefLbl) + ')</option>' +
+    '<option value="latest"' + (_fcCur === "latest" ? " selected" : "") + '>对比:自动·最近不同版本</option>' +
+    '<option value=""' + (_fcCur === "" ? " selected" : "") + '>不对比版本</option>' +
+    ((S.cfg && S.cfg.versions) || []).slice().reverse().map(v => '<option value="' + v.id + '"' + (_fcCur === v.id ? " selected" : "") + '>对比:' + esc(v.label) + '</option>').join("") +
+    '</select>';
   html += '<div class="card' + (mob ? ' m-fill-card' : '') + '"><div class="card-h"><h3>' + tableTitle + '</h3>' +
     '<div class="seg" id="period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (S.period === p.key || (p.key === "YTD" && S.period.startsWith("YTD")) ? "on" : "") + '">' + p.label + '</button>').join('') + '</div>' +
     '<select class="ctrl" id="fill-ytd" style="width:80px;margin-left:4px;' + (S.period.startsWith("YTD") ? "" : "display:none") + '">' + MN.map((m, i) => '<option value="' + (i + 1) + '"' + (S.period === "YTD-" + (i + 1) ? " selected" : "") + '>' + m + '</option>').join('') + '</select>' +
+    cmpSelHtml +
     '<button class="btn sm" id="btn-collapse-all" title="折叠所有小计分组,行多时让界面更干净">🔽 折叠全部</button>' +
     '<button class="btn sm" id="btn-expand-all" title="展开所有小计分组">🔼 展开全部</button>' +
     '<button class="btn sm' + (S.showMonthlyAop ? ' on-acc' : '') + '" id="btn-toggle-maop" title="在每个预估月输入框下方显示该月 AOP 目标与达成度。默认关闭,保持界面清爽">🎯 月度指标' + (S.showMonthlyAop ? ' ✓' : '') + '</button>' +
@@ -2301,8 +2329,9 @@ async function renderFill() {
   if ($("#prov-sel")) $("#prov-sel").onchange = e => { S.fillProv = e.target.value; renderFill(); };
   if ($("#grp-sel")) $("#grp-sel").onchange = e => { S.fillGrp = e.target.value; renderFill(); };
   if ($("#fill-mode-seg")) $("#fill-mode-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.mode) { S.fillMode = b.dataset.mode; if(S.fillCollapsed)S.fillCollapsed.clear(); renderFill(); } };
-  if ($("#period-seg")) $("#period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!S.period.startsWith("YTD")) S.period = "YTD-12"; } else { S.period = b.dataset.p; } renderFill(); renderCtx(); } };
+  if ($("#period-seg")) $("#period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!S.period.startsWith("YTD")) S.period = "YTD-" + ytdCutMonth(); } else { S.period = b.dataset.p; } renderFill(); renderCtx(); } };
   if ($("#fill-ytd")) $("#fill-ytd").onchange = e => { S.period = "YTD-" + e.target.value; renderFill(); renderCtx(); };
+  if ($("#fill-cmp-sel")) $("#fill-cmp-sel").onchange = e => { S.fillCmp = e.target.value; try { Store.pset("fc-fillcmp", S.fillCmp); } catch (_) {} renderFill(); };
   if ($("#overall")) $("#overall").oninput = e => { if (isReviewerMe()) return; ensureDoc(S.curRep).overall = e.target.value; saveRepDoc(S.curRep); };
   $("#fill-body").addEventListener("input", e => {
     if (isReviewerMe()) return;   // 审阅者只读
@@ -2739,8 +2768,8 @@ function paintRepStats(entries, ver) {
   const grCmpBase = (p === "FY") ? String(S.cfg.ly) : (pShortL + "·" + S.cfg.ly);
   const acc = ver ? calcVerAccuracy(entries, ver, ms) : null;
   el.innerHTML =
-    stat("YTD 实际达成", fmtPct(ytdP > 0 ? ytdA / ytdP : null), fmtK(ytdA) + " / " + fmtK(ytdP) + " K") +
-    stat("YTD实际 Growth", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
+    stat("YTD实际达成 · 截至" + ytdCutMonth() + "月", fmtPct(ytdP > 0 ? ytdA / ytdP : null), fmtK(ytdA) + " / " + fmtK(ytdP) + " K（AOP按关账月合计）") +
+    stat("YTD实际 Growth · 截至" + ytdCutMonth() + "月", '<span class="' + clsSign(ytdGr) + '">' + fmtPct(ytdGr) + "</span>", "去年YTD " + fmtK(ytdP) + " K") +
     stat(pLbl + "预估 (Act+FCST)", fmtK(fy) + "<span style='font-size:12px'> K</span>", "AOP " + fmtK(aop) + " K") +
     stat(pLbl + "预估达成 Ach%", '<span class="' + clsAch(ach) + '">' + achSymHtml(ach) + fmtPct(ach) + "</span>", aop > 0 ? "缺口 " + fmtK(aop - fy) + " K" : "无指标") +
     stat(pLbl + " GR% vs " + grCmpBase, '<span class="' + clsSign(gr) + '">' + fmtPct(gr) + "</span>", "去年同期 " + fmtK(ly) + " K") +
@@ -3360,7 +3389,7 @@ async function renderDash() {
      无效/不兼容的已选值会在重渲染时由上方「筛选联动」逻辑自动剔除。 */
   $("#dim-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.dim = b.dataset.d; d.open.clear(); renderDash(); } };
   $("#met-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.metric = b.dataset.m; renderDash(); } };
-  $("#dash-period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!d.period.startsWith("YTD")) d.period = "YTD-12"; } else { d.period = b.dataset.p; } renderDash(); } };
+  $("#dash-period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!d.period.startsWith("YTD")) d.period = "YTD-" + ytdCutMonth(); } else { d.period = b.dataset.p; } renderDash(); } };
   if ($("#dash-ytd")) $("#dash-ytd").onchange = e => { d.period = "YTD-" + e.target.value; renderDash(); };
   $("#rsm-f").onchange = e => { d.rsm = e.target.value; renderDash(); };
   $("#cmp-sel").onchange = e => { d.cmp = "manual"; d.cmpId = e.target.value; renderDash(); };
@@ -5033,8 +5062,21 @@ function renderAdmin() {
   h += vs.length
     ? '<table class="dt"><thead><tr><th class="l">版本</th><th class="l">保存时间</th><th></th></tr></thead><tbody>' +
       vs.slice().reverse().map(v => '<tr><td class="l"><b>' + esc(v.label) + '</b></td><td class="l" style="color:var(--mute)">' + dt(v.savedAt) + '</td><td><button class="btn sm danger" data-delv="' + v.id + '">删除</button></td></tr>').join("") +
-      '</tbody></table><p style="color:var(--mute);font-size:12px;margin-top:8px">填写页与看板默认对比<b>最近一个版本</b>;看板也可手动选任意版本。</p>'
+      '</tbody></table>'
     : '<p style="color:var(--mute)">还没有版本。建议:每次提报截止 → 点「保存当前为新版本」;下次填写时所有页面即显示 Δ 变化。导入新数据时也可勾选自动快照。</p>';
+  /* 填写页默认对比版本(管理员统一设置,随共享配置同步给所有人;每位同事仍可在填写页自行覆盖) */
+  {
+    const dv = (cfg && cfg.fillCmpDefault != null) ? cfg.fillCmpDefault : "latest";
+    h += '<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">' +
+      '<label style="font-size:12px;color:var(--ink2);font-weight:600">填写页「默认对比版本」(统一设置,所有人生效)</label>' +
+      '<div style="margin-top:6px"><select class="ctrl" id="ad-fillcmp" style="min-width:230px">' +
+        '<option value="latest"' + (dv === "latest" ? " selected" : "") + '>自动 · 最近一个与当前不同的版本</option>' +
+        '<option value=""' + (dv === "" ? " selected" : "") + '>不对比版本</option>' +
+        vs.slice().reverse().map(v => '<option value="' + v.id + '"' + (dv === v.id ? " selected" : "") + '>指定:' + esc(v.label) + '</option>').join("") +
+      '</select></div>' +
+      '<p style="color:var(--mute);font-size:12px;margin-top:6px">这是所有人打开<b>填写页</b>时的默认对比基准。每位同事仍可在填写页顶部的「对比版本」下拉里临时改成自己想看的版本,只影响本人视图,不影响别人,也不改动这里的统一设置。看板保持自己独立的对比选择。</p>' +
+    '</div>';
+  }
   h += "</div></div>";
   /* ④ 产品口径 */
   h += '<div class="card"><div class="card-h"><b>④ 产品填写口径与单价</b></div><div style="padding:14px 16px;font-size:13px">';
@@ -5206,6 +5248,7 @@ function renderAdmin() {
   $("#ad-import").onclick = () => $("#file-xlsx").click();
   $("#ad-snap").onclick = openSnapModal;
   if ($("#ad-savecfg")) $("#ad-savecfg").onclick = saveCfgBasics;
+  if ($("#ad-fillcmp")) $("#ad-fillcmp").onchange = async e => { if (!S.cfg) { toast("请先导入数据"); return; } S.cfg.fillCmpDefault = e.target.value; await Store.set("fc-cfg", S.cfg); toast("已更新填写页默认对比版本(所有人生效)"); };
   $$("#tab-admin [data-cm]").forEach(ch => ch.onclick = () => { ch.classList.toggle("q"); ch.textContent = MN[+ch.dataset.cm - 1] + (ch.classList.contains("q") ? " ✓" : ""); });
   $$("#tab-admin [data-qg]").forEach(ch => ch.onclick = async () => {
     if (!S.cfg) { toast("请先导入数据"); return; }
@@ -6028,6 +6071,7 @@ async function init() {
   const firstLocal = !Store.shared && (Store.sbEnabled || cloudMode());
   await loadAll(firstLocal);
   S.me = firstLocal ? Store.pgetLocal("fc-me") : await Store.pget("fc-me");
+  S.fillCmp = firstLocal ? Store.pgetLocal("fc-fillcmp") : await Store.pget("fc-fillcmp");   // 个人「对比版本」选择(null=跟随管理员默认)
   await validateMe();
   if (S.me && S.me.role === "rep") S.curRep = S.me.name;
   applyMe();
@@ -7967,19 +8011,32 @@ function fcAsp(b){
   if (isFinite(ov) && ov > 0) return ov / 1000;   // 元/件 → K/件
   let aA=0,aQ=0,cA=0,cQ=0,lA=0,lQ=0;
   for(let i=0;i<12;i++){ aA+=b.aopA[i]||0; aQ+=b.aopQ[i]||0; cA+=b.actA[i]||0; cQ+=b.actQ[i]||0; lA+=b.lyA[i]||0; lQ+=b.lyQ[i]||0; }
-  if(aQ>0) return aA/aQ; if(cQ>0) return cA/cQ; if(lQ>0) return lA/lQ; return 0;
+  if(aQ>0) return aA/aQ; if(cQ>0) return cA/cQ; if(lQ>0) return lA/lQ;
+  return fcProductAsp(b.product);   // ★ 逐行无 AOP/实际/去年基线 → 用产品级平均单价兜底,避免个别医院"只填数量"时金额算不出(显示0)
 }
 /* 某产品的自动推算单价(元/件),供管理后台展示参考 */
 function fcAutoPrice(product){
-  let aA=0,aQ=0,cA=0,cQ=0,lA=0,lQ=0;
-  for(const b of (S.fcBase||[])){
-    if(b.product!==product) continue;
-    for(let i=0;i<12;i++){ aA+=b.aopA[i]||0; aQ+=b.aopQ[i]||0; cA+=b.actA[i]||0; cQ+=b.actQ[i]||0; lA+=b.lyA[i]||0; lQ+=b.lyQ[i]||0; }
+  const k = fcProductAsp(product);   // K/件
+  return k>0 ? k*1000 : 0;           // 元/件
+}
+/* 产品级平均单价(K/件):某医院×产品逐行没有 AOP/实际/去年基线时的兜底单价 = 该产品全局(所有医院合计)金额÷数量。
+   使"只填了数量"的鞘预估在填写页/看板/概览/报表/导出全链路都能换算出金额。每次 fcBuildEntries 重建时清空缓存,跟随最新数据。 */
+let _fcPwAsp = null;
+function fcProductAsp(product){
+  if (!_fcPwAsp){
+    _fcPwAsp = {};
+    const agg = {};
+    for(const b of (S.fcBase||[])){
+      const p=b.product; if(!p) continue;
+      const g = agg[p] || (agg[p]={aA:0,aQ:0,cA:0,cQ:0,lA:0,lQ:0});
+      for(let i=0;i<12;i++){ g.aA+=b.aopA[i]||0; g.aQ+=b.aopQ[i]||0; g.cA+=b.actA[i]||0; g.cQ+=b.actQ[i]||0; g.lA+=b.lyA[i]||0; g.lQ+=b.lyQ[i]||0; }
+    }
+    for(const p in agg){ const g=agg[p]; _fcPwAsp[p] = g.aQ>0?g.aA/g.aQ:(g.cQ>0?g.cA/g.cQ:(g.lQ>0?g.lA/g.lQ:0)); }
   }
-  const asp = aQ>0 ? aA/aQ : (cQ>0 ? cA/cQ : (lQ>0 ? lA/lQ : 0));   // K/件
-  return asp>0 ? asp*1000 : 0;   // 元/件
+  return _fcPwAsp[product] || 0;   // K/件
 }
 function fcBuildEntries(){
+  _fcPwAsp = null;   // ★ 每次重建时清空产品级单价缓存,确保跟随最新 fcBase / 单价
   const actSet = new Set(S.fcCfg.actMonths||[]);
   return (S.fcBase||[]).map(b=>{
     const key = b.hospCode + "|" + b.product;
@@ -8186,7 +8243,7 @@ function renderForecastFill(){
         else {
           let val;
           if(S.fcMetric==="qty") val = c.rawq!=null?String(+c.rawq.toFixed(2)):(c.raw!=null&&e.asp>0?String(+(c.raw/e.asp).toFixed(2)):"");
-          else val = c.raw!=null?String(+c.raw.toFixed(2)):"";
+          else val = c.raw!=null?String(+c.raw.toFixed(2)):(c.rawq!=null&&e.asp>0?String(+(c.rawq*e.asp).toFixed(2)):"");   // ★ 只填了数量时,金额模式按 数量×单价 显示换算值(原来只回显存的金额原始值→空白)
           h += '<td><input class="fc-in'+(val?" filled":"")+'" '+(editable?"":"disabled")+' data-ri="'+ri+'" data-m="'+i+'" value="'+val+'" placeholder="'+unit+'" inputmode="decimal">'+
             (S.fcMetric==="qty"?'<span class="subv" id="fcamt-'+ri+'-'+i+'">'+(c.rawq!=null&&e.asp>0?"≈"+zFmtK(c.a)+"K":"")+'</span>':'')+
             fcMaopRefHtml(e,i,ri)+'</td>';
