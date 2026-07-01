@@ -836,6 +836,100 @@ kbd.k{background:#EDF1F7;border:1px solid var(--line2);border-radius:4px;padding
   #zsr-app .zsr-subbar-right{width:100%;margin-left:0;justify-content:space-between}
 }
 
+/* ============================================================
+   ★ 完整手机端优化 —— 纯 CSS,仅在窄屏(≤720px / ≤430px)生效。
+   不改任何 JS 函数、不影响桌面(桌面宽度不触发这些规则)。
+   覆盖:鞘子导航/上下文KPI/工具条/下钻筛选/分段控件/多选面板/
+   数据表(横滑+粘连首列+触控行高)/单元格输入/筛选概览+看板嵌套表/
+   KPI卡/卡片头/提交栏/模态框。
+   ============================================================ */
+@media(max-width:720px){
+  /* 鞘 子导航:横向可滑动、加大点击区 */
+  #zsr-app .zsr-subbar{padding:8px 10px;gap:8px;margin-bottom:10px}
+  #zsr-app .zsr-subnav{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #zsr-app .zsr-subnav::-webkit-scrollbar{display:none}
+  #zsr-app .ztab{flex:1 0 auto;white-space:nowrap;padding:11px 14px;font-size:13px}
+  #zsr-app .zsr-kpibar{gap:16px;padding:2px 2px 6px}
+  #zsr-app .ctx-kpi b{font-size:16px}
+
+  /* 工具条:每组控件整行,分段按钮铺满且够高 */
+  #zsr-app .toolbar{gap:10px;padding:10px 12px;align-items:stretch}
+  #zsr-app .toolbar > div{flex:1 1 100%;min-width:0}
+  #zsr-app .toolbar .seg{width:100%}
+  #zsr-app .toolbar .seg button{flex:1 1 auto;min-height:40px}
+
+  /* 下钻筛选:标签独占一行,下拉两列(小屏一列),触控加大 */
+  .drillbar{padding:9px 10px;gap:8px}
+  .drillbar-lab{flex-basis:100%}
+  .drillbar .ms-wrap{flex:1 1 calc(50% - 4px);min-width:0}
+  .drillbar .ms-trigger{width:100%;min-width:0;min-height:42px;padding:9px 10px;font-size:13px}
+  .drill-aop{width:100%;margin-left:0;padding-left:0;border-left:none;flex-wrap:wrap;gap:6px}
+  .drill-aop .seg{width:100%}
+  .drill-aop .seg button{flex:1 1 auto;min-height:38px}
+
+  /* 多选下拉面板:不超出屏幕、标签换行、条目够大 */
+  .ms-panel{max-width:min(88vw,340px);max-height:60vh}
+  .ms-panel label{white-space:normal;padding:10px 14px;font-size:13px}
+  .ms-panel input[type=checkbox]{width:18px;height:18px}
+
+  /* 分段控件通用触控高度 */
+  .seg button{min-height:38px}
+  .ov-metseg{margin-left:0}
+  .ov-metseg button{padding:8px 14px;min-height:36px}
+
+  /* 数据表:横向滚动 + 触控行高;首列粘连保留 */
+  .twrap{max-height:none;-webkit-overflow-scrolling:touch}
+  /* 后台里未被 .twrap 包裹的宽表(人员匹配审计 / 单价表)在手机上让表格自身横向滚动,避免撑破整页 */
+  #ztab-admin table.dt,#tab-admin table.dt{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+  .dt th,.dt td{padding:10px 9px}
+  .dt th.sortable{padding-top:12px;padding-bottom:12px}
+  .grp-caret,.ov-car{width:22px;height:22px;font-size:11px}
+
+  /* 单元格输入/下拉:约 44px 触控目标 */
+  #zsr-app .cell-sel,#zsr-app .cell-in{min-height:42px;padding:9px 10px;font-size:13px;border-radius:8px}
+  #zsr-app .cell-sel{min-width:124px}
+  #zsr-app .cell-in{width:100%;min-width:120px}
+
+  /* 筛选概览 / 看板嵌套表:两栏分布改上下堆叠、内边距加大 */
+  .ov-prod{margin:0 8px 12px}
+  .ov-pbar{padding:8px 12px}
+  .ov-pt{font-size:16px}
+  .ovt thead th,.ovt td{padding:8px 8px}
+  .ovmt thead th,.ovmt td{padding:6px 7px}
+  .ovmt td.n,.ovmt td.u,.ovmt td.p{width:auto}
+  .ovdw{flex-direction:column;gap:4px}
+  .ovh{flex-basis:auto;padding:6px 12px}
+  .ovh+.ovh{border-left:none;border-top:1px dashed var(--line2)}
+  .ovbar{height:9px}
+
+  /* KPI 卡:两列 */
+  #zsr-app .kpis{grid-template-columns:repeat(2,1fr);gap:8px;padding:12px}
+  #zsr-app .kpi{padding:10px 12px}
+  #zsr-app .kpi b{font-size:18px}
+
+  /* 卡片头换行、小按钮够大 */
+  .card-h{flex-wrap:wrap;row-gap:6px}
+  .btn.sm{min-height:38px;padding:8px 12px}
+
+  /* 提交栏 */
+  #zsr-app .submit-state{font-size:12.5px;flex-basis:100%}
+  #zsr-app .btn.pri{min-height:44px}
+
+  /* 模态框贴合手机 */
+  .modal-b{padding:16px 16px}
+  .modal-h{padding:14px 16px;font-size:14px}
+  .modal-f{padding:12px 16px}
+}
+@media(max-width:430px){
+  /* 小手机:下钻一行一列,字号再收一点 */
+  .drillbar .ms-wrap{flex:1 1 100%}
+  #zsr-app .toolbar .seg button{font-size:12px;padding:8px 4px}
+  #zsr-app .zsr-kpibar{gap:12px}
+  #zsr-app .ctx-kpi b{font-size:15px}
+  .dt th,.dt td{padding:9px 7px;font-size:12px}
+  .ovt{font-size:11.5px}
+}
+
 </style>
 
 </head>
