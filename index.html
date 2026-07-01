@@ -8843,12 +8843,15 @@ window.__zsrFcEntries = function(){
     let o = groups.get(gk);
     if (!o){ o = { rep, prov, line, m:zZeros(), mq:zZeros(), aopA:zZeros(), aopQ:zZeros(), lyA:zZeros(), lyQ:zZeros(), actA:zZeros(), actQ:zZeros(), zmgr:String(e.manager||"").trim(), zreg:String(e.region||"").trim(), skus:new Set() }; groups.set(gk, o); }
     if (e.product) o.skus.add(e.product);
+    /* ★ 单位对齐:鞘模块金额单位是「千元 K」,主模块(预估收集)金额单位是「元」(显示时 fmtK 再÷1000)。
+       并入主看板/报表时,鞘的所有金额字段需 ×1000(K→元);数量(件)两模块一致,不换算。
+       否则鞘金额会比主数据小 1000 倍,合并看板里显示成「零点几」。 */
     for (let i=0;i<12;i++){
-      o.m[i]  += (e.m[i] && isFinite(e.m[i].a)) ? e.m[i].a : 0;
+      o.m[i]  += (e.m[i] && isFinite(e.m[i].a)) ? e.m[i].a*1000 : 0;
       o.mq[i] += (e.m[i] && isFinite(e.m[i].q)) ? e.m[i].q : 0;
-      o.aopA[i]+= e.aopA[i]||0; o.aopQ[i]+= e.aopQ[i]||0;
-      o.lyA[i] += e.lyA[i]||0;  o.lyQ[i] += e.lyQ[i]||0;
-      o.actA[i]+= e.actA[i]||0; o.actQ[i]+= e.actQ[i]||0;
+      o.aopA[i]+= (e.aopA[i]||0)*1000; o.aopQ[i]+= e.aopQ[i]||0;
+      o.lyA[i] += (e.lyA[i]||0)*1000;  o.lyQ[i] += e.lyQ[i]||0;
+      o.actA[i]+= (e.actA[i]||0)*1000; o.actQ[i]+= e.actQ[i]||0;
     }
   }
   const out = [];
