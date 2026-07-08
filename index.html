@@ -5532,8 +5532,30 @@ async function detectCloud(){
   try { if (typeof window.__zsrCloudProbe === "function") z = await window.__zsrCloudProbe(); else z = { notReady:true }; }
   catch(e){ z = { error: String(e && e.message || e) }; }
   blocks.push(formatZsrProbe(z));
-  blocks.push('<div style="margin-top:8px;color:var(--mute);font-size:11.5px">说明:「条数」为云端实际存储的记录行数(每位代表填写、底表、口径、密码各算若干条)。显示「✅ 已连接」即代表该模块数据正在实时同步到云端。</div>');
+  /* ★ 云端容量测算:拉取 fc_data 全部 key+data,统计总体量、Top10 大键,对照免费版 500MB 上限 */
+  blocks.push(await probeCloudCapacity());
+  blocks.push('<div style="margin-top:8px;color:var(--mute);font-size:11.5px">说明:「条数」为云端实际存储的记录行数(每位代表填写、底表、口径、密码各算若干条)。显示「✅ 已连接」即代表该模块数据正在实时同步到云端。容量为 fc_data 表 JSON 数据净体量(不含数据库索引/日志开销,权威用量见 Supabase 控制台 Settings→Usage)。</div>');
   out.innerHTML = blocks.join("");
+}
+/* 云端容量:总大小 / 条数 / Top10 大键 / 距 500MB 免费上限余量 */
+async function probeCloudCapacity(){
+  const label = "📊 云端容量(fc_data)";
+  if (!(Store.sbEnabled && Store.sb)) return '<div style="margin:6px 0">'+label+': <span style="color:var(--mute)">○ 未连接(离线/本机模式,无云端占用)</span></div>';
+  try {
+    const { data, error } = await Store.sb.from("fc_data").select("key,data");
+    if (error) return '<div style="margin:6px 0">'+label+': <span style="color:var(--red)">✗ 读取失败 — '+esc(error.message||"")+'</span></div>';
+    let total = 0;
+    const sizes = (data||[]).map(r => { const n = JSON.stringify(r.data == null ? "" : r.data).length; total += n; return [r.key, n]; })
+      .sort((a,b) => b[1]-a[1]);
+    const mb = total/1048576, LIMIT = 500;
+    const pct = mb/LIMIT*100;
+    const fmtSz = n => n >= 1048576 ? (n/1048576).toFixed(2)+" MB" : (n/1024).toFixed(1)+" KB";
+    let h = '<div style="margin:6px 0">'+label+': <b>'+mb.toFixed(2)+' MB</b> / '+(data||[]).length+' 条 · 免费版上限 500 MB · 已用 <b style="color:'+(pct>70?"var(--red)":pct>40?"var(--amber)":"var(--green)")+'">'+pct.toFixed(1)+'%</b>(余 '+(LIMIT-mb).toFixed(0)+' MB)</div>';
+    h += '<div style="margin:4px 0 2px;color:var(--mute);font-size:12px">最大的 10 个键(清理旧版本快照 fc-v-* / 减少历史包袱可释放空间):</div>';
+    h += '<table class="dt" style="max-width:520px"><thead><tr><th class="l">键</th><th>大小</th></tr></thead><tbody>'+
+      sizes.slice(0,10).map(([k,n]) => '<tr><td class="l" style="font-family:var(--num)">'+esc(k)+'</td><td class="num">'+fmtSz(n)+'</td></tr>').join("")+'</tbody></table>';
+    return h;
+  } catch(e){ return '<div style="margin:6px 0">'+label+': <span style="color:var(--red)">✗ 测算异常 — '+esc(String(e && e.message || e))+'</span></div>'; }
 }
 async function probeCloudTable(label, sb, table, fillPrefix, fillLabel){
   if (!sb) return '<div style="margin:6px 0">'+label+': <span style="color:var(--mute)">○ 未连接(当前为离线 / 本机模式)</span></div>';
@@ -9208,6 +9230,60 @@ zboot();
   #fbr-app table.fdt{font-size:12px}
 }
 
+/* ══ 字段分组配色:一眼区分「基础信息 / 策略 / 基线指标 / 准入依据 / 准入推进 / 上量 / BI实际」 ══ */
+/* 分组表头:各组专属色带(顶部粗色条 + 同色系底) */
+#fbr-app table.fdt tr.fgrp th{border-top:3px solid transparent}
+#fbr-app table.fdt tr.fgrp th.g-base {background:#eef1f5;color:#5b6779;border-top-color:#94a0b4}
+#fbr-app table.fdt tr.fgrp th.g-strat{background:#efe9fc;color:#6d4fc4;border-top-color:#8b6ee0}
+#fbr-app table.fdt tr.fgrp th.g-kpi  {background:#fcf0da;color:#9c6716;border-top-color:#e5a23c}
+#fbr-app table.fdt tr.fgrp th.g-acc  {background:#e0f4ef;color:#127c6c;border-top-color:#2fa896}
+#fbr-app table.fdt tr.fgrp th.g-adv  {background:#e4eefd;color:#2e6be5;border-top-color:#5b8ff0}
+#fbr-app table.fdt tr.fgrp th.g-vol  {background:#fce8f0;color:#c2456f;border-top-color:#e0719a}
+#fbr-app table.fdt tr.fgrp th.g-bi   {background:#e1f3e9;color:#1c8a58;border-top-color:#3cb479}
+/* 第二行列头:同色系更浅底 */
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-strat{background:#f6f3fd;color:#5d44a8}
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-kpi  {background:#fdf6e9;color:#8a5c17}
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-acc  {background:#edf8f5;color:#116a5d}
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-adv  {background:#eff5fe;color:#2559be}
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-vol  {background:#fdf1f5;color:#a63a5e}
+#fbr-app table.fdt thead tr:not(.fgrp) th.g-bi   {background:#edf7f1;color:#177347}
+/* 数据区:极浅同色系底,分组可辨且不干扰阅读(基础信息保持白底) */
+#fbr-app table.fdt td.g-strat{background:#fbfaff}
+#fbr-app table.fdt td.g-kpi  {background:#fffcf3}
+#fbr-app table.fdt td.g-acc  {background:#f6fcfa}
+#fbr-app table.fdt td.g-adv  {background:#f8fbff}
+#fbr-app table.fdt td.g-vol  {background:#fff9fb}
+#fbr-app table.fdt td.g-bi   {background:#f6fcf8}
+/* 分组之间的竖分隔线(加重) */
+#fbr-app table.fdt th.gend,#fbr-app table.fdt td.gend{border-right:2px solid #c8d1de}
+/* 表格上方的分组图例 */
+#fbr-app .fglegend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;font-size:11.5px}
+#fbr-app .fglegend .fgl{display:inline-flex;align-items:center;gap:5px;font-weight:800;padding:3px 10px;border-radius:6px;border-left:4px solid}
+#fbr-app .fglegend .fgl i{font-style:normal;font-weight:500;opacity:.8}
+#fbr-app .fgl.g-base {background:#eef1f5;color:#5b6779;border-color:#94a0b4}
+#fbr-app .fgl.g-strat{background:#efe9fc;color:#6d4fc4;border-color:#8b6ee0}
+#fbr-app .fgl.g-kpi  {background:#fcf0da;color:#9c6716;border-color:#e5a23c}
+#fbr-app .fgl.g-acc  {background:#e0f4ef;color:#127c6c;border-color:#2fa896}
+#fbr-app .fgl.g-adv  {background:#e4eefd;color:#2e6be5;border-color:#5b8ff0}
+#fbr-app .fgl.g-vol  {background:#fce8f0;color:#c2456f;border-color:#e0719a}
+#fbr-app .fgl.g-bi   {background:#e1f3e9;color:#1c8a58;border-color:#3cb479}
+/* 顶部横向滚动条(自绘轨道+滑块,与表格双向联动;替代表格下方原生滚动条,所有平台都稳定可见) */
+#fbr-app .fscrolltop{position:relative;height:12px;background:#eef1f6;border-radius:6px;margin:0 0 6px;cursor:pointer}
+#fbr-app .fscrolltop>div{position:absolute;top:1px;left:0;height:10px;background:#b6c2d4;border-radius:5px;min-width:36px;cursor:grab;transition:background .15s}
+#fbr-app .fscrolltop>div:hover{background:#8fa2bd}
+#fbr-app .fscrolltop>div.drag{background:#7d93b3;cursor:grabbing}
+#fbr-app .fwrap{scrollbar-width:none}
+#fbr-app .fwrap::-webkit-scrollbar{display:none}
+/* 「显示字段」弹窗中的分组小色块 */
+#fbr-app .gtag{display:inline-block;font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:4px;min-width:56px;max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;flex:none}
+#fbr-app .gtag.g-base {background:#eef1f5;color:#5b6779}
+#fbr-app .gtag.g-strat{background:#efe9fc;color:#6d4fc4}
+#fbr-app .gtag.g-kpi  {background:#fcf0da;color:#9c6716}
+#fbr-app .gtag.g-acc  {background:#e0f4ef;color:#127c6c}
+#fbr-app .gtag.g-adv  {background:#e4eefd;color:#2e6be5}
+#fbr-app .gtag.g-vol  {background:#fce8f0;color:#c2456f}
+#fbr-app .gtag.g-bi   {background:#e1f3e9;color:#1c8a58}
+
 </style>
 <script>
 (function(){
@@ -9404,23 +9480,23 @@ const COLS=[
  {id:"rsm",g:"基础信息",lab:"RSM",w:60},
  {id:"dsm",g:"基础信息",lab:"DSM",w:60},
  {id:"rep",g:"基础信息",lab:"Rep",w:74},
+ {id:"ib",g:"基础信息",lab:"IB总台数",w:66,edit:"num"},
+ {id:"aib",g:"基础信息",lab:"Active IB",w:66,edit:"num"},
+ {id:"mpc",g:"基础信息",lab:"MPC清单",w:60,ro:"tog"},
  {id:"strat",g:"策略",lab:"策略类型",w:118,edit:"sel",opts:STRATS},
  {id:"bt",g:"策略",lab:"膀胱肿瘤·术者进展",w:120,edit:"sel",opts:BT_OPTS,dep:"膀胱肿瘤"},
  {id:"wx",g:"策略",lab:"维修焕新·状态",w:96,edit:"sel",opts:WX_OPTS,dep:"维修焕新"},
- {id:"ib",g:"策略",lab:"IB总台数",w:66,edit:"num"},
- {id:"aib",g:"策略",lab:"Active IB",w:66,edit:"num"},
- {id:"mpc",g:"策略",lab:"MPC清单",w:60,ro:"tog"},
  {id:"fy25y",g:"基线/指标",lab:"一次FY25",w:70,ro:"num"},
  {id:"fy25f",g:"基线/指标",lab:"复用FY25",w:70,ro:"num"},
  {id:"aopY",g:"基线/指标",lab:"一次AOP26",w:76,ro:"num"},
  {id:"aopF",g:"基线/指标",lab:"复用AOP26",w:76,ro:"num"},
  {id:"tgtY",g:"基线/指标",lab:"一次目标年化",w:84,edit:"num"},
  {id:"tgtF",g:"基线/指标",lab:"复用目标年化",w:84,edit:"num"},
- {id:"ins",g:"准入依据",lab:"医保政策",w:100,edit:"txt"},
- {id:"guide",g:"准入依据",lab:"立项指南等",w:100,edit:"txt"},
- {id:"fee",g:"准入依据",lab:"光纤结石收费(市场部)",w:110,ro:"txt"},
- {id:"gd",g:"准入依据",lab:"立项指南信息(市场部)",w:110,ro:"txt"},
- {id:"gdone",g:"准入依据",lab:"已执行立项指南",w:80,edit:"tog"},
+ {id:"ins",g:"医保政策/立项指南/收费等情况",lab:"医保政策",w:100,edit:"txt"},
+ {id:"guide",g:"医保政策/立项指南/收费等情况",lab:"立项指南等",w:100,edit:"txt"},
+ {id:"fee",g:"医保政策/立项指南/收费等情况",lab:"光纤结石收费(市场部)",w:110,ro:"txt"},
+ {id:"gd",g:"医保政策/立项指南/收费等情况",lab:"立项指南信息(市场部)",w:110,ro:"txt"},
+ {id:"gdone",g:"医保政策/立项指南/收费等情况",lab:"已执行立项指南",w:80,edit:"tog"},
  {id:"tgtM",g:"准入推进",lab:"目标完成月",w:74,edit:"mon"},
  {id:"actM",g:"准入推进",lab:"实际完成月",w:74,edit:"mon"},
  {id:"s1",g:"准入推进",lab:"①经销商",w:58,edit:"tog"},
@@ -9446,10 +9522,15 @@ const COLS=[
  {id:"gapT",g:"BI实际(合计)",lab:"vs AOP Gap",w:76,ro:"gap"}
 ];
 const DEF_HIDE=["dealer","lvl","city","rsm","dsm"];   /* 默认隐藏列(可在「🧩 显示字段」里重新打开) */
-function pcols(){ if(!S.pcols) S.pcols={order:COLS.map(c=>c.id),hide:DEF_HIDE.slice(),w:{},v:2};
+/* 分组 → 配色 class 映射(BI实际三组同一色系,靠组名区分) */
+const GCLS={"基础信息":"g-base","策略":"g-strat","基线/指标":"g-kpi","医保政策/立项指南/收费等情况":"g-acc","准入推进":"g-adv","上量":"g-vol","BI实际(一次)":"g-bi","BI实际(复用)":"g-bi","BI实际(合计)":"g-bi"};
+const gcls=g=>GCLS[g]||"g-base";
+function pcols(){ if(!S.pcols) S.pcols={order:COLS.map(c=>c.id),hide:DEF_HIDE.slice(),w:{},v:3};
   for(const c of COLS) if(!S.pcols.order.includes(c.id)) S.pcols.order.push(c.id);
   /* 一次性迁移:老偏好(v<2)补上新的默认隐藏列;之后用户自行勾选显示则尊重其选择 */
   if(!(S.pcols.v>=2)){ for(const id of DEF_HIDE) if(!S.pcols.hide.includes(id)) S.pcols.hide.push(id); S.pcols.v=2; savePcols(); }
+  /* v3 迁移:IB总台数/Active IB/MPC清单 重新归类为「基础信息」,老偏好里把这三列挪到 Rep 之后,保证分组连续 */
+  if(!(S.pcols.v>=3)){ const mv=["ib","aib","mpc"].filter(id=>S.pcols.order.includes(id)); S.pcols.order=S.pcols.order.filter(x=>!mv.includes(x)); const ri=S.pcols.order.indexOf("rep"); S.pcols.order.splice((ri<0?S.pcols.order.length-1:ri)+1,0,...mv); S.pcols.v=3; savePcols(); }
   return S.pcols; }
 function visCols(){ const p=pcols(); return p.order.map(id=>COLS.find(c=>c.id===id)).filter(c=>c&&!p.hide.includes(c.id)); }
 function savePcols(){ Store.pset("fbr-cols",S.pcols); }
@@ -9509,13 +9590,20 @@ function renderFill(){
   const cols=visCols(), p=pcols();
   S._lastList = list;   /* 供「导出(无需上传共享盘)」导出当前筛选范围 */
   const shown=list.slice(0,CAP);
+  /* 分组图例:一眼看懂每种颜色代表什么字段 */
+  h+='<div class="fglegend"><span class="fgl g-base">基础信息 <i>医院/组织/装机(导入)</i></span>'+
+     '<span class="fgl g-strat">策略字段 <i>销售选择的打法</i></span>'+
+     '<span class="fgl g-kpi">基线/指标 <i>FY25 · AOP26 · 目标年化</i></span>'+
+     '<span class="fgl g-acc">医保政策/立项指南/收费等情况</span><span class="fgl g-adv">准入推进</span><span class="fgl g-vol">上量</span><span class="fgl g-bi">BI实际</span></div>';
+  const gend=(i)=>(i+1<cols.length&&cols[i+1].g!==cols[i].g)?" gend":"";
+  h+='<div class="fscrolltop" id="fscrolltop" title="左右滚动查看更多列"><div></div></div>';
   h+='<div class="fwrap"><table class="fdt" id="ftable"><colgroup>'+cols.map(c=>'<col style="width:'+(p.w[c.id]||c.w)+'px">').join("")+'</colgroup><thead>';
   /* 分组行 */
   let gh='<tr class="fgrp">'; let gi=0;
-  while(gi<cols.length){ let gj=gi; while(gj<cols.length&&cols[gj].g===cols[gi].g) gj++; gh+='<th colspan="'+(gj-gi)+'">'+esc(cols[gi].g)+'</th>'; gi=gj; }
-  h+=gh+'</tr><tr>'+cols.map(c=>'<th draggable="true" data-cid="'+c.id+'" class="'+(c.stick?"stick1 ":"")+'" style="position:'+(c.stick?"sticky":"sticky")+'" title="拖动=调整列顺序 · 拖右缘=调列宽">'+esc(c.lab)+'<span class="colres" data-cid="'+c.id+'"></span></th>').join("")+'</tr></thead><tbody>';
+  while(gi<cols.length){ let gj=gi; while(gj<cols.length&&cols[gj].g===cols[gi].g) gj++; gh+='<th colspan="'+(gj-gi)+'" class="'+gcls(cols[gi].g)+' gend">'+esc(cols[gi].g)+'</th>'; gi=gj; }
+  h+=gh+'</tr><tr>'+cols.map((c,ci)=>'<th draggable="true" data-cid="'+c.id+'" class="'+(c.stick?"stick1 ":"")+gcls(c.g)+gend(ci)+'" style="position:'+(c.stick?"sticky":"sticky")+'" title="拖动=调整列顺序 · 拖右缘=调列宽">'+esc(c.lab)+'<span class="colres" data-cid="'+c.id+'"></span></th>').join("")+'</tr></thead><tbody>';
   for(const e of shown){
-    h+='<tr'+(e.lag?' class="lagY"':'')+' data-code="'+esc(e.code)+'">'+cols.map(c=>'<td class="'+(c.stick?"stick1 ":"")+((c.ro&&/num|gap/.test(c.ro))||c.edit==="num"?"num":"")+'" title="'+esc(c.lab)+'">'+cellHtml(e,c)+'</td>').join("")+'</tr>';
+    h+='<tr'+(e.lag?' class="lagY"':'')+' data-code="'+esc(e.code)+'">'+cols.map((c,ci)=>'<td class="'+(c.stick?"stick1 ":"")+((c.ro&&/num|gap/.test(c.ro))||c.edit==="num"?"num ":"")+gcls(c.g)+gend(ci)+'" title="'+esc(c.lab)+'">'+cellHtml(e,c)+'</td>').join("")+'</tr>';
   }
   h+='</tbody></table></div>';
   if(list.length>CAP) h+='<div class="hint" style="margin-top:6px">⚠ 共 '+list.length+' 行,仅显示前 '+CAP+' 行 — 请用上方筛选/搜索缩小范围</div>';
@@ -9537,6 +9625,28 @@ function bindFillEvents(){
   const fs=$("#fsel"); if(fs) fs.onchange=()=>{ S.sel=fs.value; Store.pset("fbr-sel",S.sel); renderFill(); };
   bindFlt("#ftab-fill", renderFill);
   const cv=$("#fcolvis"); if(cv) cv.onclick=openColVis;
+  /* 顶部横向滚动条(自绘) ⇄ 表格 双向同步:拖滑块/点轨道/滚轮 → 表格滚动;表格滚动 → 滑块跟随 */
+  const st=$("#fscrolltop"), fw=$("#ftab-fill .fwrap");
+  if(st&&fw){
+    const th=st.firstElementChild;
+    const geom=()=>{ const track=st.clientWidth, max=fw.scrollWidth-fw.clientWidth;
+      if(max<=1){ st.style.display="none"; return null; }
+      st.style.display="";
+      const tw=Math.max(36, track*fw.clientWidth/fw.scrollWidth);
+      return {max,tw,span:track-tw}; };
+    const paint=()=>{ const g=geom(); if(!g) return; th.style.width=g.tw+"px"; th.style.left=(g.span*(fw.scrollLeft/g.max))+"px"; };
+    paint();
+    fw.onscroll=paint;
+    th.onmousedown=e=>{ e.preventDefault(); e.stopPropagation(); const g0=geom(); if(!g0) return; th.classList.add("drag");
+      const x0=e.clientX, l0=parseFloat(th.style.left)||0;
+      const mv=ev=>{ const g=geom(); if(!g) return; const l=Math.min(g.span,Math.max(0,l0+ev.clientX-x0)); fw.scrollLeft=g.max*(l/g.span); };
+      const up=()=>{ th.classList.remove("drag"); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+      document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up); };
+    st.onmousedown=e=>{ if(e.target!==st) return; const g=geom(); if(!g) return;
+      const r=st.getBoundingClientRect(); const l=Math.min(g.span,Math.max(0,e.clientX-r.left-g.tw/2)); fw.scrollLeft=g.max*(l/g.span); };
+    st.onwheel=e=>{ e.preventDefault(); fw.scrollLeft+=(e.deltaX||e.deltaY); };
+    if(window.ResizeObserver){ const ro=new ResizeObserver(paint); ro.observe(fw); const tbl=$("#ftable"); if(tbl) ro.observe(tbl); }
+  }
   const sv=$("#f-save"); if(sv) sv.onclick=async()=>{ clearTimeout(_saveT); const ok=await Store.set("fbr-fill",S.fill); toast(ok?"✓ 已保存":"⚠ 保存失败"); };
   const ex=$("#f-exp"); if(ex) ex.onclick=()=>{ exportXlsx(S._lastList||[]); toast("已导出 Excel 明细(无需上传)"); };
   const tb=$("#ftable"); if(!tb) return;
@@ -9589,10 +9699,10 @@ function openColVis(){
   const p=pcols();
   openModal("🧩 显示字段(勾选=显示,可拖表头调顺序)",
     '<div style="display:flex;flex-wrap:wrap;gap:4px 16px;max-height:50vh;overflow:auto">'+
-    p.order.map(id=>{ const c=COLS.find(x=>x.id===id); if(!c) return ""; return '<label style="font-size:12.5px;display:inline-flex;gap:5px;align-items:center;width:170px"><input type="checkbox" data-cvis="'+id+'"'+(p.hide.includes(id)?"":" checked")+'> '+esc(c.g)+' · '+esc(c.lab)+'</label>'; }).join("")+'</div>',
+    p.order.map(id=>{ const c=COLS.find(x=>x.id===id); if(!c) return ""; return '<label style="font-size:12.5px;display:inline-flex;gap:5px;align-items:center;width:200px"><input type="checkbox" data-cvis="'+id+'"'+(p.hide.includes(id)?"":" checked")+'> <span class="gtag '+gcls(c.g)+'">'+esc(c.g)+'</span> '+esc(c.lab)+'</label>'; }).join("")+'</div>',
     '<button class="btn" id="fcv-reset">恢复默认</button><button class="btn pri" id="fcv-ok">完成</button>');
   $$("#fmodal [data-cvis]").forEach(cb=>cb.onchange=()=>{ const p2=pcols(); if(cb.checked) p2.hide=p2.hide.filter(x=>x!==cb.dataset.cvis); else if(!p2.hide.includes(cb.dataset.cvis)) p2.hide.push(cb.dataset.cvis); savePcols(); });
-  $("#fcv-reset").onclick=()=>{ S.pcols={order:COLS.map(c=>c.id),hide:DEF_HIDE.slice(),w:{},v:2}; savePcols(); closeModal(); renderFill(); };
+  $("#fcv-reset").onclick=()=>{ S.pcols={order:COLS.map(c=>c.id),hide:DEF_HIDE.slice(),w:{},v:3}; savePcols(); closeModal(); renderFill(); };
   $("#fcv-ok").onclick=()=>{ closeModal(); renderFill(); };
 }
 
