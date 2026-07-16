@@ -1788,6 +1788,30 @@ async function openAuditList(){
 }
 window.__fcBk = { get run(){ return fcRunBackup; }, get check(){ return fcAutoBackupCheck; }, get audit(){ return fcAudit; }, get openBkList(){ return openBkList; }, get openAuditList(){ return openAuditList; }, get fetch(){ return fcFetchDocs; } };
 
+/* =================== 🔗 三模块组织架构统一(鞘+光纤 → 预估) ===================
+   预估收集(本模块)的 代表→DSM→大区 为唯一权威;鞘/光纤各自的同步函数通过
+   window 桥接调用,分别改名+按省份刷新归属并保存云端。BI 导入后也会自动执行。 */
+async function orgSyncAllModules(){
+  toast("正在统一组织架构…");
+  let zr = null, fr = null;
+  try { zr = (typeof window.__zsrOrgSync === "function") ? await window.__zsrOrgSync({ silent: true }) : null; } catch(e){ console.error(e); }
+  try { fr = (typeof window.__fbrOrgSync === "function") ? await window.__fbrOrgSync({ silent: true }) : null; } catch(e){ console.error(e); }
+  const sec = (name, r) => {
+    if (!r) return "<p><b>" + name + ":</b> <span style='color:var(--mute)'>模块桥接不可用(请刷新页面重试)</span></p>";
+    if (!r.ok) return "<p><b>" + name + ":</b> <span style='color:var(--mute)'>" + esc(r.msg || "跳过") + "</span></p>";
+    const n = (r.renamed || 0) + (r.renamedFc || 0), f = (r.refreshed || 0) + (r.refreshedFc || 0);
+    let h = "<p><b>" + name + ":</b> 代表改名 <b>" + n + "</b> 行 · 经理/大区刷新 <b>" + f + "</b> 行" + ((n || f) ? " — 已保存云端" : " — 已一致,无需改动") + "</p>";
+    if (r.renameLog && r.renameLog.length) h += '<p class="hint" style="margin:4px 0 0 12px">' + r.renameLog.map(x => esc(x[0]) + "(" + x[1] + "行)").join("<br>") + "</p>";
+    if (r.unmatched && r.unmatched.length) h += '<p style="margin:4px 0 0 12px;color:#B45309;font-size:12.5px"><b>未匹配(保留原值):</b>' + r.unmatched.map(x => esc(x[0]) + "(" + x[1] + "行)").join("、") + "</p>";
+    return h;
+  };
+  openModal("🔗 组织架构统一结果(以预估模块为准)",
+    '<div style="max-height:56vh;overflow:auto;font-size:13px;line-height:1.7">' + sec("鞘入院模块", zr) + sec("光纤模块", fr) +
+    '<p class="hint" style="margin-top:10px">说明:改名把旧姓名/岗位号(含「张三(原李四岗)」写法)统一为预估模块当前写法;经理/大区按预估模块归属刷新(跨区代表按省份逐行归属)。未匹配人员通常是已离职且辖区未换手 — 可先在主模块完成换手,或修改鞘/光纤原始文件后重新导入。鞘/光纤的填写数据按医院code存储,改名不丢任何数据。今后每次 BI 数据导入会自动执行本同步,无需手动维护。</p></div>',
+    '<button class="btn pri" onclick="closeModal()">知道了</button>');
+  fcAudit("组织架构统一(手动)", "鞘:" + (zr && zr.ok ? (zr.total || 0) + "行" : "跳过") + " · 光纤:" + (fr && fr.ok ? ((fr.renamed || 0) + (fr.refreshed || 0)) + "行" : "跳过"));
+}
+
 /* =================== 📌 填写页「我的待办」卡 ===================
    代表:本期未填行数(点击定位) / 被管理调整行(点击看明细) / 开口月完成度 / 提交状态。
    DSM·RSM·管理员:范围内未提交代表数(点击去提报进度) / 管理调整行 / 团队完成度。 */
@@ -4756,9 +4780,13 @@ async function commitImport() {
         else if (zr && zr.skip) zsrInfo = " · 鞘未同步:" + zr.skip;
       } catch (e) { console.error("鞘模块同步失败:", e); zsrInfo = " · ⚠鞘同步失败(看板可能暂缺鞘实际,可在鞘模块手动导入)"; }
     }
+    /* ★ 组织架构自动统一:每次 BI 导入后,把鞘/光纤模块的 代表/经理/大区 同步为本次主数据口径 */
+    let orgInfo = "";
+    try { if (typeof window.__zsrOrgSync === "function"){ const zo = await window.__zsrOrgSync({ silent: true }); if (zo && zo.ok && zo.total) orgInfo += " · 鞘架构统一" + zo.total + "行"; } } catch(e){ console.error("鞘架构同步:", e); }
+    try { if (typeof window.__fbrOrgSync === "function"){ const fo = await window.__fbrOrgSync({ silent: true }); if (fo && fo.ok && (fo.renamed || fo.refreshed)) orgInfo += " · 光纤架构统一" + (fo.renamed + fo.refreshed) + "行"; } } catch(e){ console.error("光纤架构同步:", e); }
     rerender();
-    toast("✅ 导入完成: " + master.meta.combos + " 个组合 · 关账 " + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo);
-    fcAudit("BI数据导入", master.meta.combos + "个组合 · 关账" + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo);
+    toast("✅ 导入完成: " + master.meta.combos + " 个组合 · 关账 " + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo + orgInfo);
+    fcAudit("BI数据导入", master.meta.combos + "个组合 · 关账" + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo + orgInfo);
     /* ★ 未分类产品提示:本次数据若有产品未归入任何类别,导入后立刻弹窗提醒(只在确有未分类时出现) */
     const _unc = unclassifiedProducts();
     if (_unc.length) {
@@ -5807,6 +5835,7 @@ function renderAdmin() {
     '</div>' +
     '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:<b>代表必须输入本人登录密码</b>,未设密码的代表无法进入(密码加密保存,无法回看,忘记只能重置);DSM/RSM 先用个人密码,未设则用通用口令。重置/清除密码后,对应人员已记住的身份会自动失效,需重新登录。密码以加密哈希形式保存在本机;若团队多机使用,改完密码后请通过「导出数据包」经共享盘分发给团队,对方导入后生效。</p>' +
+    '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">🔗 组织架构统一</b> <span class="hint">以本模块(预估收集)的 代表→DSM→大区 为唯一权威;一键把「鞘入院 + 光纤」两个模块的姓名与归属统一成一致。每次 BI 导入、鞘/光纤导入后也会自动同步</span><div style="margin-top:6px"><button class="btn sm pri" id="btn-orgsync-all">🔗 立即统一三模块(鞘+光纤 → 预估架构)</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">🗄 数据快照与操作日志</b> <span class="hint">每 7 天自动快照(保留 4 份,含主预估/鞘/光纤),误操作可一键回滚;导入/清空/回滚等关键操作自动留痕</span><div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm pri" id="btn-bk-list">🗄 查看快照 / 回滚</button><button class="btn sm" id="btn-bk-now">⚡ 立即快照</button><button class="btn sm" id="btn-audit-list">📜 操作日志</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">💬 用户反馈</b> <span class="hint">全员可通过右下角「💬 反馈」按钮提交建议/Bug/数据问题</span><div style="margin-top:6px"><button class="btn sm pri" id="btn-fb-list">查看反馈列表</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="ad-clearmgr">🧹 清除管理调整数据</button><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div>' +
@@ -5986,6 +6015,7 @@ function renderAdmin() {
   if ($("#btn-bk-list")) $("#btn-bk-list").onclick = openBkList;
   if ($("#btn-bk-now")) $("#btn-bk-now").onclick = async () => { toast("正在生成快照…"); const r = await fcRunBackup("手动"); if (r) toast("✅ 快照完成(" + r.n + " 个文档 · 管理后台「查看快照」可回滚)"); };
   if ($("#btn-audit-list")) $("#btn-audit-list").onclick = openAuditList;
+  if ($("#btn-orgsync-all")) $("#btn-orgsync-all").onclick = orgSyncAllModules;
   fcAutoBackupCheck();   /* 管理员打开后台时也触发每周自动快照检查 */
   if ($("#ad-clearmgr")) $("#ad-clearmgr").onclick = openClearMgr;
   /* ★ Supabase 配置绑定 */
@@ -8298,6 +8328,93 @@ function _oaBadge(level){
   if (level==="warn")  return '<span class="tag" style="background:var(--amber-soft);color:var(--amber)">不一致</span>';
   return '<span class="tag" style="background:var(--blue-soft);color:var(--blue)">提示</span>';
 }
+/* =====================================================================
+   ★ 一键统一:把鞘数据(入院名录 S.base + 鞘预估 S.fcBase)的 代表/经理/大区
+   统一为「预估收集」当前架构。匹配顺序:规范名完全一致 → 预估侧「新名(原X岗)」
+   后缀反查 → 唯一包含关系;经理/大区优先按 (代表,省份) 从主数据逐行归属
+   (支持跨区代表分属不同经理),查不到再回退代表级,再回退原值。
+   填写数据按「医院code+产品」为键,改名不影响任何已填内容。
+   apply=false 仅试算(预览用),不改任何数据。
+   ===================================================================== */
+function zsrOrgFix(apply){
+  let roster = [];
+  try { roster = (typeof window.__fcOrgRoster === "function") ? window.__fcOrgRoster() : []; } catch(e){}
+  if (!roster.length) return { ok:false, msg:"预估模块名册不可用(请先在主模块导入系统数据)" };
+  const byCanon = new Map(), bySuffix = new Map();
+  for (const r of roster){
+    byCanon.set(zCanonName(r.rep), r);
+    const m = String(r.rep).match(/^(.+?)[(（]原(.+?)岗[)）]$/);
+    if (m) bySuffix.set(zCanonName(m[2]), r);
+  }
+  const findHit = rep => {
+    const c = zCanonName(rep); if (!c) return null;
+    let hit = byCanon.get(c) || bySuffix.get(c);
+    if (!hit){
+      const cands = roster.filter(r => { const rc = zCanonName(r.rep); return rc.includes(c) || c.includes(rc); });
+      if (cands.length === 1) hit = cands[0];
+    }
+    return hit || null;
+  };
+  const renameLog = new Map(), unmatched = new Map();
+  const fixRows = rows => {
+    let rn = 0, rf = 0;
+    for (const row of (rows || [])){
+      const hit = findHit(row.rep);
+      if (!hit){ if (zCanonName(row.rep)) unmatched.set(row.rep, (unmatched.get(row.rep) || 0) + 1); continue; }
+      let org = null;
+      try { org = (typeof window.__fcOrgOfRepProv === "function") ? window.__fcOrgOfRepProv(hit.rep, row.province) : null; } catch(e){}
+      const nd = (org && org.dsm) || hit.dsm || row.manager || "";
+      const nr = (org && org.rsm) || hit.rsm || row.region || "";
+      if (String(row.rep) !== String(hit.rep)){
+        const lk = row.rep + " → " + hit.rep;
+        renameLog.set(lk, (renameLog.get(lk) || 0) + 1);
+        if (apply) row.rep = hit.rep;
+        rn++;
+      }
+      if (String(row.manager || "") !== String(nd) || String(row.region || "") !== String(nr)){
+        if (apply){ row.manager = nd; row.region = nr; }
+        rf++;
+      }
+    }
+    return { rn: rn, rf: rf };
+  };
+  const a = fixRows(S.base), b = fixRows(S.fcBase);
+  return { ok:true, applied:!!apply, renamed:a.rn, refreshed:a.rf, renamedFc:b.rn, refreshedFc:b.rf,
+    total: a.rn + a.rf + b.rn + b.rf,
+    renameLog: [...renameLog.entries()], unmatched: [...unmatched.entries()] };
+}
+async function zsrOrgSyncRun(opts){
+  const silent = !!(opts && opts.silent);
+  if ((!S.base || !S.base.length) && (!S.fcBase || !S.fcBase.length)){
+    const r0 = { ok:false, msg:"鞘数据未加载或为空" }; if (!silent) toast("⚠ " + r0.msg); return r0;
+  }
+  const r = zsrOrgFix(true);
+  if (!r.ok){ if (!silent) toast("⚠ " + r.msg); return r; }
+  if (r.total){
+    if ((r.renamed || r.refreshed) && S.base && S.base.length) await saveBase();
+    if ((r.renamedFc || r.refreshedFc) && S.fcBase && S.fcBase.length) await saveFcBase();
+    try { window.fcAudit && window.fcAudit("鞘模块组织架构同步", "改名" + (r.renamed + r.renamedFc) + "行 · 归属刷新" + (r.refreshed + r.refreshedFc) + "行"); } catch(e){}
+    try { rerender(); } catch(e){}
+  }
+  if (!silent) toast(r.total ? "✅ 鞘模块已统一:改名 " + (r.renamed + r.renamedFc) + " 行 · 归属刷新 " + (r.refreshed + r.refreshedFc) + " 行" : "✓ 鞘模块与预估架构已一致,无需修改");
+  return r;
+}
+window.__zsrOrgSync = zsrOrgSyncRun;
+function openZsrOrgFixModal(){
+  const r = zsrOrgFix(false);   /* 试算预览,不改数据 */
+  if (!r.ok){ toast("⚠ " + r.msg); return; }
+  let b = '<div class="modal-h"><b>🔗 统一为预估架构(预览)</b></div><div class="modal-b" style="font-size:13px;line-height:1.7;max-height:60vh;overflow:auto">';
+  b += '<p>将把鞘模块 <b>入院名录 ' + (S.base || []).length + ' 行 + 鞘预估 ' + (S.fcBase || []).length + ' 行</b> 的 代表/经理/大区 统一为「预估收集」当前架构:</p>';
+  b += '<p style="margin-top:6px">代表改名 <b>' + (r.renamed + r.renamedFc) + '</b> 行 · 经理/大区刷新 <b>' + (r.refreshed + r.refreshedFc) + '</b> 行</p>';
+  if (r.renameLog.length) b += '<p style="margin-top:6px"><b>改名对照:</b><br>' + r.renameLog.map(x => esc(x[0]) + '(' + x[1] + '行)').join('<br>') + '</p>';
+  if (r.unmatched.length) b += '<p style="margin-top:6px;color:#B45309"><b>未能匹配(保留原值,请人工核对):</b><br>' + r.unmatched.map(x => esc(x[0]) + '(' + x[1] + '行)').join('、') + '</p>';
+  b += '<p class="hint" style="margin-top:8px">填写/预估数据按「医院code+产品」存储,改名不影响任何已填内容;改名后代表用预估模块的姓名登录即可看到自己的医院。以后每次 BI 导入 / 鞘数据导入都会自动执行本同步。</p>';
+  b += '</div><div class="modal-f"><button class="btn" id="zof-no">取消</button>' + (r.total ? '<button class="btn pri" id="zof-ok">执行统一并保存</button>' : '<button class="btn pri" id="zof-no2">已一致,关闭</button>') + '</div>';
+  openModal(b);
+  if ($("#zof-no")) $("#zof-no").onclick = closeModal;
+  if ($("#zof-no2")) $("#zof-no2").onclick = closeModal;
+  if ($("#zof-ok")) $("#zof-ok").onclick = async () => { closeModal(); toast("正在统一并保存…"); await zsrOrgSyncRun({}); renderAdmin(); };
+}
 function orgAuditCardHtml(){
   const a = buildOrgAudit();
   let h = '<div class="card"><div class="card-h"><b>🔍 架构校验（与「预估收集」架构对账）</b>';
@@ -8321,6 +8438,7 @@ function orgAuditCardHtml(){
     h += '</tbody></table></div>';
   }
   h += '<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'+
+    '<button class="btn sm pri" id="oa-fix">🔗 一键统一为预估架构(改名+归属)</button>'+
     '<button class="btn sm" id="oa-refresh">🔄 重新校验</button>'+
     (a.issues.length?'<button class="btn sm" id="oa-export">⬇ 导出校验结果(CSV)</button>':'')+
     '</div></div></div>';
@@ -8527,6 +8645,7 @@ function bindAdmin(){
   });
   /* ===== 架构校验面板 ===== */
   if ($("#oa-refresh")) $("#oa-refresh").onclick = () => { renderAdmin(); toast("已重新校验"); };
+  if ($("#oa-fix")) $("#oa-fix").onclick = openZsrOrgFixModal;
   if ($("#oa-export")) $("#oa-export").onclick = oaExportCsv;
 }
 
@@ -8618,7 +8737,7 @@ async function importFromText(text){
     const g = idx => idx>=0 ? (cells[idx]??"").trim() : "";
     recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),layout:g(C.layout),blocker:g(C.blocker),note:g(C.note) });
   }
-  if (ingestRows(recs)){ await saveBase(); await saveFill(); toast("已导入 "+S.base.length+" 条记录"); rerender(); }
+  if (ingestRows(recs)){ let _of=null; try { _of = zsrOrgFix(true); } catch(e){} await saveBase(); await saveFill(); toast("已导入 "+S.base.length+" 条记录" + (_of && _of.ok && _of.total ? " · 架构已按预估模块统一" + _of.total + "行" : "")); rerender(); }
 }
 function handleXlsxFile(file){
   const reader = new FileReader();
@@ -8642,7 +8761,7 @@ function handleXlsxFile(file){
         if (!String(g(C.hospCode)).trim() && !String(g(C.product)).trim()) continue;
         recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),contracted:g(C.contracted),product:g(C.product),contractVol:g(C.contractVol),freeVol:g(C.freeVol),stepSel:g(C.stepSel),equip:g(C.equip),layout:g(C.layout),blocker:g(C.blocker),note:g(C.note) });
       }
-      if (ingestRows(recs)){ await saveBase(); await saveFill(); toast("已从「"+sheetName+"」导入 "+S.base.length+" 条记录"); rerender(); }
+      if (ingestRows(recs)){ let _of=null; try { _of = zsrOrgFix(true); } catch(e){} await saveBase(); await saveFill(); toast("已从「"+sheetName+"」导入 "+S.base.length+" 条记录" + (_of && _of.ok && _of.total ? " · 架构已按预估模块统一" + _of.total + "行" : "")); rerender(); }
     } catch(err){ console.error(err); toast("⚠ 解析失败:"+err.message); }
   };
   reader.readAsArrayBuffer(file);
@@ -8683,6 +8802,7 @@ function importPkg(){
     rd.onload = async e => { try { const p = JSON.parse(e.target.result); if (!p.base){ toast("⚠ 数据包格式不正确"); return; }
       S.base=p.base||[]; S.baseMeta=p.baseMeta||{importedAt:Date.now(),count:S.base.length}; S.fill=p.fill||{}; S.versions=p.versions||[]; S.passwords=p.passwords||{};
       if(p.fcBase){ S.fcBase=p.fcBase; S.fcMeta=p.fcMeta||null; S.fcCfg=p.fcCfg||S.fcCfg; } if(p.fcFill) S.fcFill=p.fcFill; if(p.shareDriveUrl!=null) S.shareDriveUrl=p.shareDriveUrl;
+      try { zsrOrgFix(true); } catch(e){}   /* 数据包可能带旧名字:落库前先统一为预估架构 */
       await saveBase(); await saveFill(); await saveVersions(); await savePasswords();
       if(p.fcBase||p.fcFill) { await saveFcBase(); await saveFcFill(); } if(p.shareDriveUrl!=null) await Store.set("zsr-sharedrive", S.shareDriveUrl);
       toast("已导入数据包"); try { window.fcAudit && window.fcAudit("鞘模块导入数据包", (S.base || []).length + "行名录"); } catch(e){} rerender();
@@ -9453,7 +9573,7 @@ async function importFcFromText(text){
   const recs=[];
   for(let i=1;i<lines.length;i++){ const cells=lines[i].split(sep); const g=idx=>idx>=0?(cells[idx]??"").trim():"";
     recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),product:g(C.product),month:g(C.month),aopA:g(C.aopA),actA:g(C.actA),lyA:g(C.lyA),aopQ:g(C.aopQ),actQ:g(C.actQ),lyQ:g(C.lyQ) }); }
-  if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
+  if(fcIngest(recs)){ try { zsrOrgFix(true); } catch(e){} await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行(架构已按预估模块统一)"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
 }
 function handleFcXlsx(file){
   const reader=new FileReader();
@@ -9469,7 +9589,7 @@ function handleFcXlsx(file){
       const recs=[];
       for(let i=hr+1;i<arr.length;i++){ const cells=arr[i]; const g=idx=>idx>=0?cells[idx]:""; if(!String(g(C.hospCode)).trim()&&!String(g(C.product)).trim()) continue;
         recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),product:g(C.product),month:g(C.month),aopA:g(C.aopA),actA:g(C.actA),lyA:g(C.lyA),aopQ:g(C.aopQ),actQ:g(C.actQ),lyQ:g(C.lyQ) }); }
-      if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
+      if(fcIngest(recs)){ try { zsrOrgFix(true); } catch(e){} await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行(架构已按预估模块统一)"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
     }catch(err){ console.error(err); toast("⚠ 解析失败:"+err.message); }
   };
   reader.readAsArrayBuffer(file);
@@ -10033,12 +10153,27 @@ function fbrOrgFix(rows){
     }
     if(hit){
       if(norm(row.rep)!==norm(hit.rep)){ const lk=row.rep+" → "+hit.rep; renameLog.set(lk,(renameLog.get(lk)||0)+1); row.rep=hit.rep; renamed++; }
-      const nd=hit.dsm||row.dsm||"", nr=hit.rsm||row.rsm||"";
+      let org=null; try{ org=(typeof window.__fcOrgOfRepProv==="function")?window.__fcOrgOfRepProv(hit.rep,row.prov):null; }catch(e){}
+      const nd=(org&&org.dsm)||hit.dsm||row.dsm||"", nr=(org&&org.rsm)||hit.rsm||row.rsm||"";
       if(norm(row.dsm)!==norm(nd)||norm(row.rsm)!==norm(nr)){ row.dsm=nd; row.rsm=nr; refreshed++; }
     } else if(c){ unmatched.set(row.rep,(unmatched.get(row.rep)||0)+1); }
   }
   return { ok:true, renamed, refreshed, renameLog:[...renameLog.entries()], unmatched:[...unmatched.entries()] };
 }
+/* ★ 桥接:供主模块(BI导入后/管理后台按钮)调用的光纤组织架构同步 */
+window.__fbrOrgSync = async function(opts){
+  const silent = !!(opts && opts.silent);
+  if (!S.base || !S.base.length) return { ok:false, msg:"光纤数据未加载或为空" };
+  const r = fbrOrgFix(S.base);
+  if (!r.ok){ if (!silent) toast("⚠ " + r.msg); return r; }
+  if (r.renamed || r.refreshed){
+    await Store.set("fbr-base", { rows: S.base });
+    try { window.fcAudit && window.fcAudit("光纤模块组织架构同步", "改名" + r.renamed + "行 · 归属刷新" + r.refreshed + "行"); } catch(e){}
+    try { rerender(); } catch(e){}
+  }
+  if (!silent) toast(r.renamed || r.refreshed ? "✅ 光纤已统一:改名 " + r.renamed + " 行 · 归属刷新 " + r.refreshed + " 行" : "✓ 光纤与预估架构已一致");
+  return r;
+};
 
 /* ---------- 行计算 ---------- */
 function fillOf(code){ return S.fill[code] || {}; }
