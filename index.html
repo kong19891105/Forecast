@@ -34,6 +34,16 @@ body{
 button{font-family:inherit;cursor:pointer;transition:var(--transition)}
 input,select,textarea{font-family:inherit;font-size:inherit;color:var(--ink);transition:var(--transition)}
 .num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+/* ── ② UI优化: 全局数字等宽对齐(所有表格/输入框数字列上下对齐) + 看板控件分组 ── */
+table td,table th{font-variant-numeric:tabular-nums}
+input.ctrl,.fc-in,.rm-in,select.ctrl{font-variant-numeric:tabular-nums}
+.cg{display:inline-flex;align-items:center;gap:6px;padding:3px 7px 3px 9px;background:#F8FAFD;border:1px solid var(--line);border-radius:10px}
+.cg>i.cg-l{font-style:normal;font-size:11px;color:var(--mute);font-weight:700;white-space:nowrap;letter-spacing:.02em}
+.card-h{row-gap:8px}
+/* ── ③ 手机端: 填写页底部固定保存栏 ── */
+#mob-savebar{position:fixed;left:0;right:0;bottom:0;z-index:900;background:rgba(255,255,255,.97);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);border-top:1px solid var(--line);padding:8px 12px;padding-bottom:calc(8px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:10px;box-shadow:0 -4px 16px rgba(15,30,60,.10)}
+#mob-savebar .btn{white-space:nowrap;flex-shrink:0}
+@media (min-width:721px){#mob-savebar{display:none}}
 
 /* scrollbar */
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -1636,6 +1646,277 @@ async function openFbList(){
     document.body.appendChild(b);
   } catch(e){}
 })();
+/* =================== 🗄 数据安全:每周自动快照(可回滚) + 操作审计日志 ===================
+   管理员在线打开页面时自动检测:距上次快照 >7 天 → 静默全量备份(主预估+鞘+光纤核心文档)到 fc-backup-*,
+   滚动保留 4 份;管理后台可查看、手动快照、一键回滚(回滚前先把当前数据再备份一份,误回滚也能回来)。
+   快照大文档只走云端直读直写,不进本地缓存(避免撑爆浏览器 localStorage)。
+   关键写操作(BI导入/数据包导入/清空/清调整/回滚/鞘·光纤导入)自动写审计日志 fc-audit-*。 */
+const BK_KEEP = 4, BK_DAYS = 7;
+const BK_FIXED_KEYS = ["fc-cfg","fc-master","fc-mgr","fc-dash-comments","fc-passwords",
+  "zsr-base","zsr-fill","zsr-fill-submit","zsr-fc-base","zsr-fc-fill","zsr-tracking",
+  "fbr-base","fbr-fill","fbr-cfg"];
+let _fcBkChecked = false;
+function fmtBytes(b){ return b > 1048576 ? (b/1048576).toFixed(1) + " MB" : b > 1024 ? Math.round(b/1024) + " KB" : (b||0) + " B"; }
+/* 快照大文档:云端直写/直读/直删(绕过 localStorage 缓存) */
+async function bkWrite(key, payload){
+  if (!(Store.sbEnabled && Store.sb)) return false;
+  try { const { error } = await Store.sb.from("fc_data").upsert({ key: key, data: payload, updated_at: new Date().toISOString() }, { onConflict: "key" }); return !error; } catch(e){ console.error(e); return false; }
+}
+async function bkRead(key){
+  if (!(Store.sbEnabled && Store.sb)) return null;
+  try { const { data, error } = await Store.sb.from("fc_data").select("data").eq("key", key).single(); return (!error && data) ? data.data : null; } catch(e){ return null; }
+}
+async function bkDel(key){ if (Store.sbEnabled && Store.sb){ try { await Store.sb.from("fc_data").delete().eq("key", key); } catch(e){} } }
+/* 批量取一组文档(一次云端查询;失败回退逐个读) */
+async function fcFetchDocs(prefix){
+  if (Store.sbEnabled && Store.sb){
+    try { const { data, error } = await Store.sb.from("fc_data").select("key,data").like("key", prefix + "%");
+      if (!error && data) return data.map(x => ({ key: x.key, v: x.data })); } catch(e){}
+  }
+  const out = [];
+  for (const k of await Store.list(prefix)){ const v = await Store.get(k); if (v != null) out.push({ key: k, v: v }); }
+  return out;
+}
+/* 管理员在线时的自动快照检查:距上次 >7 天才做,每次会话最多触发一次 */
+function fcAutoBackupCheck(){
+  if (_fcBkChecked || !Store.sbEnabled || !S.me || S.me.role !== "admin") return;
+  _fcBkChecked = true;
+  setTimeout(async () => {
+    try {
+      const idx = await Store.get("fc-backup-index");
+      const last = (idx && idx.list && idx.list.length) ? Math.max.apply(null, idx.list.map(x => x.at || 0)) : 0;
+      if (Date.now() - last < BK_DAYS * 86400e3) return;
+      const r = await fcRunBackup("自动", true);
+      if (r) toast("🗄 已自动生成每周数据快照(" + r.n + " 个文档),管理后台可查看/回滚");
+    } catch(e){ console.error("autoBackup:", e); }
+  }, 9000);
+}
+async function fcRunBackup(mode, silent){
+  if (!(Store.sbEnabled && Store.sb)){ if (!silent) toast("⚠ 未连接云端,无法生成快照"); return null; }
+  const docs = {};
+  for (const k of BK_FIXED_KEYS){ const v = await Store.get(k); if (v != null) docs[k] = v; }
+  for (const d of await fcFetchDocs("fc-f-")) docs[d.key] = d.v;
+  const n = Object.keys(docs).length;
+  if (!n){ if (!silent) toast("⚠ 没有可备份的数据"); return null; }
+  const at = Date.now();
+  const key = "fc-backup-" + new Date(at).toISOString().replace(/[-T:]/g, "").slice(0, 14) + "-" + Math.random().toString(36).slice(2, 5);
+  const by = S.me ? (S.me.name || "管理员") : "";
+  const payload = { kind: "fc-backup", at: at, by: by, mode: mode || "手动", n: n, docs: docs };
+  let bytes = 0; try { bytes = JSON.stringify(payload).length; } catch(e){}
+  const ok = await bkWrite(key, payload);
+  if (!ok){ if (!silent) toast("⚠ 快照写入云端失败,请稍后重试"); return null; }
+  const idx = (await Store.get("fc-backup-index")) || { list: [] };
+  idx.list = (idx.list || []).filter(x => x.key !== key);
+  idx.list.push({ key: key, at: at, by: by, mode: payload.mode, n: n, bytes: bytes });
+  idx.list.sort((a, b) => (b.at || 0) - (a.at || 0));
+  const drop = idx.list.slice(BK_KEEP);
+  idx.list = idx.list.slice(0, BK_KEEP);
+  await Store.set("fc-backup-index", idx);
+  for (const d of drop) await bkDel(d.key);
+  try { const ak = (await Store.list("fc-audit-")).sort().reverse();     /* 审计日志保留最近 400 条 */
+    for (const k2 of ak.slice(400)) await Store.del(k2); } catch(e){}
+  fcAudit("生成数据快照", (payload.mode) + " · " + n + "个文档 · " + fmtBytes(bytes));
+  return payload;
+}
+async function openBkList(){
+  toast("加载快照…");
+  const idx = await Store.get("fc-backup-index");
+  let list = (idx && idx.list) ? idx.list.slice() : [];
+  if (!list.length){                                    /* 索引缺失时兜底扫描 */
+    const ks = (await Store.list("fc-backup-")).filter(k => k !== "fc-backup-index").sort().reverse();
+    for (const k of ks.slice(0, BK_KEEP)){ const v = await bkRead(k); if (v && v.kind === "fc-backup") list.push({ key: k, at: v.at, by: v.by, mode: v.mode, n: v.n, bytes: 0 }); }
+  }
+  list.sort((a, b) => (b.at || 0) - (a.at || 0));
+  const body = list.length
+    ? '<p class="hint" style="margin-bottom:8px">快照包含:主预估(配置/主数据/全部代表填写/管理调整/密码) + 鞘模块(名录/跟进/预估) + 光纤模块。每 ' + BK_DAYS + ' 天自动生成,滚动保留 ' + BK_KEEP + ' 份;回滚前会先把「当前数据」自动再备份一份,误回滚也能回来。</p><table class="dt" style="font-size:12.5px;width:100%"><tr><th>快照时间</th><th>类型</th><th>操作人</th><th>文档数</th><th>大小</th><th>操作</th></tr>' +
+      list.map(x => '<tr><td>' + new Date(x.at).toLocaleString("zh-CN") + '</td><td>' + esc(x.mode || "") + '</td><td>' + esc(x.by || "-") + '</td><td>' + (x.n || "?") + '</td><td>' + (x.bytes ? fmtBytes(x.bytes) : "-") + '</td><td><button class="btn sm danger" data-bkk="' + esc(x.key) + '">回滚到此快照</button></td></tr>').join("") + '</table>'
+    : '<p class="hint">还没有快照。管理员在线打开页面时每 ' + BK_DAYS + ' 天自动生成一份;也可点「立即快照」手动生成。</p>';
+  openModal("🗄 数据快照(滚动保留 " + BK_KEEP + " 份)", body,
+    '<button class="btn" onclick="closeModal()">关闭</button><button class="btn pri" id="bk-now2">立即快照</button>');
+  const nb = $("#bk-now2");
+  if (nb) nb.onclick = async () => { nb.disabled = true; toast("正在生成快照…"); const r = await fcRunBackup("手动"); if (r){ toast("✅ 快照完成(" + r.n + " 个文档)"); openBkList(); } else nb.disabled = false; };
+  $$("#modal [data-bkk]").forEach(btn => btn.onclick = () => confirmRestore(btn.dataset.bkk));
+}
+function confirmRestore(key){
+  openModal("⚠ 回滚数据到快照",
+    '<p style="font-size:13px;line-height:1.7">将把 <b>主预估 + 鞘模块 + 光纤模块</b> 的云端数据整体回滚到该快照时的状态,<b>所有人刷新页面后看到的都是快照数据</b>。</p>' +
+    '<ul style="font-size:12.5px;color:var(--ink2);line-height:1.7;margin:8px 0 0 18px"><li>回滚前会自动把「当前数据」再备份一份(类型:回滚前),误回滚可再滚回来;</li><li>快照之后新建的文档(如新代表)不会被删除,只是被快照覆盖同名文档;</li><li>回滚完成后页面会自动刷新。</li></ul>' +
+    '<p style="margin-top:10px">请输入「回滚」两个字确认:</p><input class="ctrl" id="bk-word" style="width:100%;margin-top:6px">',
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="bk-rest">执行回滚</button>');
+  $("#bk-rest").onclick = async () => {
+    if ($("#bk-word").value.trim() !== "回滚"){ toast("输入不匹配"); return; }
+    $("#bk-rest").disabled = true;
+    toast("正在回滚…(先自动备份当前数据)");
+    try {
+      const bk = await bkRead(key);
+      if (!bk || !bk.docs){ toast("⚠ 快照数据读取失败"); $("#bk-rest").disabled = false; return; }
+      await fcRunBackup("回滚前", true);
+      const keys = Object.keys(bk.docs);
+      const now = new Date().toISOString();
+      let w = 0;
+      for (let i = 0; i < keys.length; i += 25){
+        const rows = keys.slice(i, i + 25).map(k => ({ key: k, data: bk.docs[k], updated_at: now }));
+        const { error } = await Store.sb.from("fc_data").upsert(rows, { onConflict: "key" });
+        if (error) throw error;
+        w += rows.length;
+      }
+      fcAudit("回滚数据快照", new Date(bk.at).toLocaleString("zh-CN") + " · " + w + "个文档");
+      closeModal();
+      toast("✅ 已回滚到 " + new Date(bk.at).toLocaleString("zh-CN") + " 的快照(" + w + " 个文档),页面即将自动刷新…");
+      if (!window.__fcNoReload) setTimeout(() => location.reload(), 1800);
+    } catch(e){ console.error("restore:", e); toast("⚠ 回滚失败: " + (e && e.message || e)); $("#bk-rest").disabled = false; }
+  };
+}
+/* —— 操作审计日志:每条独立小文档 fc-audit-*,互不覆盖 —— */
+async function fcAudit(what, detail){
+  try {
+    const me = S.me || {};
+    const key = "fc-audit-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    await Store.set(key, { at: Date.now(), who: me.name || "", role: me.role || "", what: String(what || ""), detail: String(detail == null ? "" : detail).slice(0, 300) });
+  } catch(e){}
+}
+window.fcAudit = fcAudit;
+async function openAuditList(){
+  toast("加载操作日志…");
+  let items = (await fcFetchDocs("fc-audit-")).map(x => x.v).filter(x => x && x.at);
+  items.sort((a, b) => b.at - a.at); items = items.slice(0, 150);
+  const body = items.length
+    ? '<p class="hint" style="margin-bottom:8px">自动记录关键操作:BI导入 / 数据包导入 / 清空 / 清除管理调整 / 快照与回滚 / 鞘·光纤导入等,便于追查数据变动。显示最近 ' + items.length + ' 条。</p><div style="max-height:420px;overflow:auto"><table class="dt" style="font-size:12.5px;width:100%"><tr><th>时间</th><th>操作人</th><th>操作</th><th class="l">详情</th></tr>' +
+      items.map(x => '<tr><td style="white-space:nowrap">' + new Date(x.at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) + '</td><td style="white-space:nowrap">' + esc(x.who || "-") + '</td><td style="white-space:nowrap">' + esc(x.what) + '</td><td class="l" style="max-width:380px;word-break:break-all">' + esc(x.detail || "") + '</td></tr>').join("") + '</table></div>'
+    : '<p class="hint">暂无操作记录。之后的 BI 导入、数据包导入、清空、回滚等关键操作会自动记录在这里。</p>';
+  openModal("📜 操作日志", body, '<button class="btn pri" onclick="closeModal()">关闭</button>');
+}
+window.__fcBk = { get run(){ return fcRunBackup; }, get check(){ return fcAutoBackupCheck; }, get audit(){ return fcAudit; }, get openBkList(){ return openBkList; }, get openAuditList(){ return openAuditList; }, get fetch(){ return fcFetchDocs; } };
+
+/* =================== 📌 填写页「我的待办」卡 ===================
+   代表:本期未填行数(点击定位) / 被管理调整行(点击看明细) / 开口月完成度 / 提交状态。
+   DSM·RSM·管理员:范围内未提交代表数(点击去提报进度) / 管理调整行 / 团队完成度。 */
+function fillFirstOpenMonth(){
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
+  for (let i = 0; i < 12; i++) if (!actSet.has(i + 1)) return i;
+  return -1;
+}
+function fillMgrAdjInfo(keySet){
+  const out = [];
+  if (!S.mgr || !S.mgr.rows) return out;
+  const actSet = new Set((S.cfg && S.cfg.actMonths) || []);
+  for (const k in S.mgr.rows){
+    if (keySet && !keySet.has(k)) continue;
+    const c = S.mgr.rows[k]; const ms = [];
+    for (let i = 0; i < 12; i++){
+      if (actSet.has(i + 1)) continue;                       /* 关账月的调整已失效,不计 */
+      if ((c.a && c.a[i] != null) || (c.q && c.q[i] != null)) ms.push(i);
+    }
+    if (ms.length) out.push({ key: k, months: ms, c: c });
+  }
+  return out;
+}
+function fillTodoHtml(entriesAll){
+  if (!S.me || !entriesAll || !entriesAll.length) return "";
+  const isRep = S.me.role === "rep";
+  const fo = fillFirstOpenMonth();
+  let ofd = 0, otl = 0; entriesAll.forEach(e => { ofd += e.openFilled; otl += e.openTotal; });
+  const pct = otl ? Math.round(ofd / otl * 100) : 100;
+  const adj = fillMgrAdjInfo(new Set(entriesAll.map(e => e.key)));
+  const chip = (id, label, val, warn, hint) => '<button type="button" class="todo-chip' + (warn ? " warn" : "") + '" id="' + id + '" title="' + esc(hint || "") + '"><span class="tc-v">' + val + '</span><span class="tc-l">' + esc(label) + '</span></button>';
+  let chips = "";
+  if (isRep){
+    if (fo >= 0){
+      const unf = entriesAll.filter(e => e.m[fo] && !e.m[fo].act && e.m[fo].raw == null && e.m[fo].rawq == null).length;
+      chips += chip("td-unf", (fo + 1) + "月未填行数", unf, unf > 0, unf ? "点击定位到第一条未填的行" : (fo + 1) + "月已全部填写");
+    }
+    chips += chip("td-adj", "被管理调整行", adj.length, false, "管理层在你的提交之上调整过的行(看板用调整后数,你的原始提交不受影响),点击看明细");
+    chips += chip("td-pct", "开口月完成度", pct + "%", pct < 100, "已填开口月格数 ÷ 开口月总格数(" + ofd + "/" + otl + ")");
+    const si = repSubmitInfo(S.fcs.get(S.me.name));
+    chips += chip("td-sub", "提交状态", si.editedAfter ? "改后未交" : (si.submitted ? "已提交" : "未提交"), !si.submitted || si.editedAfter, si.submitted && !si.editedAfter ? "已确认提交 " + dt(si.submittedAt) : "填完后请点表格下方「保存并确认提交」");
+  } else {
+    const reps = scopeReps();
+    let unsub = 0; for (const r of reps){ if (!repSubmitInfo(S.fcs.get(r)).submitted) unsub++; }
+    chips += chip("td-unsub", "未提交代表", unsub + "/" + reps.length, unsub > 0, "点击打开「提报进度」看板查看名单");
+    chips += chip("td-adj", "管理调整行", adj.length, false, "范围内管理层调整过的行,点击看明细");
+    chips += chip("td-pct", "团队完成度", pct + "%", pct < 100, "含管理调整后的开口月填写完成度(" + ofd + "/" + otl + ")");
+  }
+  return '<div class="card" id="todo-card" style="margin-top:10px"><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 14px"><b style="font-size:13px;margin-right:2px">📌 我的待办</b>' + chips + '</div></div>';
+}
+function bindFillTodo(entriesAll){
+  if (!$("#todo-card")) return;
+  if (!document.getElementById("todo-css")){
+    const st = document.createElement("style"); st.id = "todo-css";
+    st.textContent = ".todo-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#F7F9FC;border-radius:999px;padding:5px 12px;font-size:12.5px;cursor:pointer;color:var(--ink2)}.todo-chip .tc-v{font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink)}.todo-chip.warn{background:#FFF7E6;border-color:#F0D9A8}.todo-chip.warn .tc-v{color:#B45309}.todo-chip:hover{border-color:var(--blue,#2054E0);color:var(--blue,#2054E0)}@keyframes todoFlash{0%,100%{background:transparent}25%{background:#FFE9A8}}.todo-flash>td,.todo-flash{animation:todoFlash 1.4s ease 2}";
+    document.head.appendChild(st);
+  }
+  const qesc = s => String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const fo = fillFirstOpenMonth();
+  const unfE = fo >= 0 ? entriesAll.filter(e => e.m[fo] && !e.m[fo].act && e.m[fo].raw == null && e.m[fo].rawq == null) : [];
+  const bU = $("#td-unf");
+  if (bU) bU.onclick = () => {
+    if (!unfE.length){ toast("👍 " + (fo + 1) + "月已全部填写"); return; }
+    for (const e of unfE){
+      const tr = document.querySelector('#tab-fill [data-key="' + qesc(e.key) + '"]');
+      if (tr && tr.style.display !== "none"){ tr.scrollIntoView({ behavior: "smooth", block: "center" }); tr.classList.remove("todo-flash"); void tr.offsetWidth; tr.classList.add("todo-flash"); return; }
+    }
+    const e0 = unfE[0];
+    toast("第一条未填:" + e0.grp + " · " + e0.prov + "(该行可能被折叠或筛选,请展开对应产品组)");
+  };
+  const bA = $("#td-adj");
+  if (bA) bA.onclick = () => {
+    const adj = fillMgrAdjInfo(new Set(entriesAll.map(e => e.key)));
+    if (!adj.length){ toast("当前范围内没有管理调整"); return; }
+    const eByK = new Map(entriesAll.map(e => [e.key, e]));
+    const fA = v => v == null ? "—" : (Math.round(v / 100) / 10) + "K";
+    const fQ = v => v == null ? "—" : Math.round(v * 10) / 10 + "件";
+    const rows = adj.map(x => {
+      const p = x.key.split("|"); const e = eByK.get(x.key);
+      const det = x.months.map(i => {
+        const ma = x.c.a ? x.c.a[i] : null, mq = x.c.q ? x.c.q[i] : null;
+        const ra = e && e.m[i] ? e.m[i].ra : null, rq = e && e.m[i] ? e.m[i].rq : null;
+        const isQ = e && e.qtyMode && (mq != null || rq != null);
+        return (i + 1) + "月:" + (isQ ? fQ(rq) + "→" + fQ(mq) : fA(ra) + "→" + fA(ma));
+      }).join(" · ");
+      return '<tr><td class="l">' + esc(p[0]) + '</td><td class="l">' + esc(p[1]) + '</td><td class="l">' + esc(p[2]) + '</td><td class="l" style="max-width:340px">' + esc(det) + "</td></tr>";
+    }).join("");
+    openModal("🧮 管理调整明细(" + adj.length + " 行)",
+      '<p class="hint" style="margin-bottom:6px">管理层(DSM/RSM/管理员)在代表提交之上做过的调整;看板/报表按「调整后」计,代表原始提交不被覆盖。格式:原值→调整后。</p><div style="max-height:400px;overflow:auto"><table class="dt" style="font-size:12.5px;width:100%"><tr><th class="l">代表</th><th class="l">省份</th><th class="l">产品组</th><th class="l">调整内容(原→调)</th></tr>' + rows + "</table></div>",
+      '<button class="btn pri" onclick="closeModal()">关闭</button>');
+  };
+  const bP = $("#td-pct");
+  if (bP) bP.onclick = () => {
+    let ofd = 0, otl = 0; entriesAll.forEach(e => { ofd += e.openFilled; otl += e.openTotal; });
+    toast("开口月已填 " + ofd + " / " + otl + " 格" + (otl && ofd < otl ? " · 还差 " + (otl - ofd) + " 格" : " · 已全部填完 🎉"));
+  };
+  const bS = $("#td-unsub");
+  if (bS) bS.onclick = () => switchTab("progress");
+  const bSub = $("#td-sub");
+  if (bSub) bSub.onclick = () => {
+    const btn = $("#btn-save-fill");
+    if (btn){ btn.scrollIntoView({ behavior: "smooth", block: "center" }); btn.classList.remove("todo-flash"); void btn.offsetWidth; btn.classList.add("todo-flash"); }
+    else toast("填写完成后请点表格下方「保存并确认提交」按钮");
+  };
+}
+
+/* =================== 📱 手机端底部固定保存栏 ===================
+   窄屏(≤720px)在填写页底部固定显示「保存并确认提交」+ 保存状态,
+   不用再滚到长表最底部找按钮;点击直接触发原提交按钮(逻辑完全复用)。 */
+function setupMobSaveBar(){
+  const old = document.getElementById("mob-savebar");
+  if (old) old.remove();
+  if (window.__mobSsObs){ try { window.__mobSsObs.disconnect(); } catch(e){} window.__mobSsObs = null; }
+  const host = $("#tab-fill"); if (host) host.style.paddingBottom = "";
+  if (!isMobile() || S.tab !== "fill") return;
+  const src = $("#btn-save-fill");
+  if (!src || src.style.display === "none") return;   /* 审阅者只读 / 无提交按钮的视图不显示 */
+  const bar = document.createElement("div");
+  bar.id = "mob-savebar";
+  bar.innerHTML = '<span id="mob-savestate" style="flex:1;min-width:0;font-size:11.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>' +
+    '<button class="btn pri" id="mob-save-btn">✅ 保存并确认提交</button>';
+  document.body.appendChild(bar);
+  const sync = () => { const ss = $("#savestate"); const el = $("#mob-savestate"); if (el) el.textContent = ((ss && ss.textContent) || "").trim() || "填写会自动保存"; };
+  sync();
+  const ss = $("#savestate");
+  if (ss){ try { window.__mobSsObs = new MutationObserver(sync); window.__mobSsObs.observe(ss, { childList: true, characterData: true, subtree: true }); } catch(e){} }
+  $("#mob-save-btn").onclick = () => { const b = $("#btn-save-fill"); if (b) b.click(); };
+  if (host) host.style.paddingBottom = "62px";   /* 防止固定栏遮住最后几行 */
+}
 function grpSortKey(g) {
   const i = GRP_ORDER.indexOf(g);
   return i >= 0 ? String(i).padStart(3, "0") : "999" + g;
@@ -2187,14 +2468,18 @@ async function renderFill() {
 
   if (needSelect) {
     html += '<div class="empty"><b>请先在上方选择' + (S.fillMode === "prov" ? "省份" : S.fillMode === "grp" ? "产品" : "姓名(岗位)") + '</b>选中后只会显示并保存该范围内的填写,与其他同事互不影响。</div></div>';
+    html += fillTodoHtml(entriesAll);   /* 📌 我的待办 */
     host.innerHTML = html;
     if ($("#rep-sel")) $("#rep-sel").onchange = e => { S.curRep = e.target.value; renderFill(); };
     if ($("#prov-sel")) $("#prov-sel").onchange = e => { S.fillProv = e.target.value; renderFill(); };
     if ($("#grp-sel")) $("#grp-sel").onchange = e => { S.fillGrp = e.target.value; renderFill(); };
     if ($("#fill-mode-seg")) $("#fill-mode-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.mode) { S.fillMode = b.dataset.mode; S.fillProv = ""; S.fillGrp = ""; if(S.fillCollapsed)S.fillCollapsed.clear(); renderFill(); } };
+    bindFillTodo(entriesAll);
+    setupMobSaveBar();   /* 无选中范围时会自动移除底部栏 */
     return;
   }
   html += "</div>";
+  html += fillTodoHtml(entriesAll);   /* 📌 我的待办 */
 
   /* BI 引流横幅 */
   html += '<div class="bi-banner">' +
@@ -2454,6 +2739,7 @@ async function renderFill() {
   }
 
   host.innerHTML = html;
+  bindFillTodo(entriesAll);   /* 📌 我的待办 */
   /* 关键修复:输入框的 data-ri 是按渲染顺序(sortedKeys = grpSortKey / GRP_ORDER 业务顺序)递增赋值的,
      而 all 数组是按 grp.localeCompare 字母序排列的,两套顺序不一致。
      之前 const entries = all 会让 entries[ri] 取到字母序的第 ri 个 entry,而不是屏幕上第 ri 行那个产品组,
@@ -2469,6 +2755,7 @@ async function renderFill() {
 
   /* 初始化月度指标参照文字 + 达成度配色 + 悬停提示 */
   $$('.fc-in').forEach(updateMaop);
+  setupMobSaveBar();   /* 📱 手机端底部保存栏 */
 
   /* 顶部显示本次预估的提交状态(单代表范围时) */
   (function(){
@@ -3279,16 +3566,24 @@ async function renderDash() {
   for (const i of ms) { tFy += T.m[i]; tAop += T.aopM[i]; tLy += T.lyM[i]; }
 
   let html = uncatBannerHtml() + '<div class="card"><div class="card-h"><h3>筛选与口径</h3>' +
+    '<span class="cg"><i class="cg-l">维度</i>' +
     '<div class="seg" id="dim-seg">' + Object.keys(dimDefs).map(k => '<button data-d="' + k + '" class="' + (d.dim === k ? "on" : "") + '">' + dimDefs[k].name + "</button>").join("") + "</div>" +
-    '<div class="seg" id="met-seg"><button data-m="amt" class="' + (d.metric === "amt" ? "on" : "") + '">金额 K</button><button data-m="qty" class="' + (d.metric === "qty" ? "on" : "") + '">数量</button></div>' +
-    '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px" title="已执行支架VBP(指标为真)的10省:江西/广西/湖南/贵州/内蒙古/河南/重庆/辽宁/陕西/吉林。其余省份的支架类7-12月指标为占位值,勾选后看板/报表及导出按0处理;云端数据不变。点「选省份」可自定义隐藏哪些省。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-dash" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>' +
+    '</span><span class="cg"><i class="cg-l">期间</i>' +
     '<div class="seg" id="dash-period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (dp === p.key || (p.key === "YTD" && dp.startsWith("YTD")) ? "on" : "") + '">' + p.key + '</button>').join('') + '</div>' +
     '<select class="ctrl" id="dash-ytd" style="width:80px;margin-left:4px;' + (dp.startsWith("YTD") ? "" : "display:none") + '">' + MN.map((m, i) => '<option value="' + (i + 1) + '"' + (dp === "YTD-" + (i + 1) ? " selected" : "") + '>' + m + '</option>').join('') + '</select>' +
-    '<select class="ctrl" id="rsm-f"><option value="">全部大区</option>' + rsms.map(r => '<option' + (d.rsm === r ? " selected" : "") + ">" + esc(r) + "</option>").join("") + "</select>" +
-    '<select class="ctrl" id="cmp-sel"><option value="">不对比版本</option>' + vs.map(v => '<option value="' + v.id + '"' + (d.cmpId === v.id ? " selected" : "") + ">对比: " + esc(v.label) + "</option>").join("") + "</select>" +
-    '<input class="ctrl" id="dash-q" placeholder="搜索代表/省/产品…" value="' + esc(d.q) + '" style="width:160px">' +
+    '</span><span class="cg"><i class="cg-l">口径</i>' +
+    '<div class="seg" id="met-seg"><button data-m="amt" class="' + (d.metric === "amt" ? "on" : "") + '">金额 K</button><button data-m="qty" class="' + (d.metric === "qty" ? "on" : "") + '">数量</button></div>' +
     (zsrAvailable() ? '<label class="chk" id="merge-zsr-wrap" title="把鞘入院模块的 ZSR鞘 / Anrei鞘 月度预估并入本看板(归入结石耗材)。取消则只看主预估数据。" style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;white-space:nowrap"><input type="checkbox" id="merge-zsr"' + (zsrMergeOn() ? " checked" : "") + '>含鞘预估</label>' : "") +
+    '</span>' +
     '<button class="btn pri sm" id="exp-xlsx" style="margin-left:auto">\u2b07 导出 Excel</button>' +
+    '</div><div class="card-h" style="padding-top:10px;padding-bottom:10px">' +
+    '<span class="cg"><i class="cg-l">范围</i>' +
+    '<select class="ctrl" id="rsm-f"><option value="">全部大区</option>' + rsms.map(r => '<option' + (d.rsm === r ? " selected" : "") + ">" + esc(r) + "</option>").join("") + "</select>" +
+    '<input class="ctrl" id="dash-q" placeholder="搜索代表/省/产品…" value="' + esc(d.q) + '" style="width:160px">' +
+    '</span><span class="cg"><i class="cg-l">对比</i>' +
+    '<select class="ctrl" id="cmp-sel"><option value="">不对比版本</option>' + vs.map(v => '<option value="' + v.id + '"' + (d.cmpId === v.id ? " selected" : "") + ">对比: " + esc(v.label) + "</option>").join("") + "</select>" +
+    '</span>' +
+    '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px" title="已执行支架VBP(指标为真)的10省:江西/广西/湖南/贵州/内蒙古/河南/重庆/辽宁/陕西/吉林。其余省份的支架类7-12月指标为占位值,勾选后看板/报表及导出按0处理;云端数据不变。点「选省份」可自定义隐藏哪些省。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-dash" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>' +
     "</div>";
 
   /* 维度下钻筛选器行 (当前维度在最前, 标记为「主」) */
@@ -4463,6 +4758,7 @@ async function commitImport() {
     }
     rerender();
     toast("✅ 导入完成: " + master.meta.combos + " 个组合 · 关账 " + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo);
+    fcAudit("BI数据导入", master.meta.combos + "个组合 · 关账" + (months.length ? months.join("、") + "月" : "无") + ovInfo + zsrInfo);
     /* ★ 未分类产品提示:本次数据若有产品未归入任何类别,导入后立刻弹窗提醒(只在确有未分类时出现) */
     const _unc = unclassifiedProducts();
     if (_unc.length) {
@@ -4787,6 +5083,7 @@ async function importRepXlsxFiles(files) {
   }
   rerender();
   toast("Excel 合并完成: 更新 " + ok + " 人" + (skip ? " · 跳过 " + skip + "(本机更新)" : "") + (recon ? " · 兼容还原 " + recon : "") + (bad ? " · 失败 " + bad : "") + (force ? " · 已强制覆盖" : ""));
+  if (ok) fcAudit("导入代表预估Excel", "更新" + ok + "人" + (bad ? " · 失败" + bad : ""));
 }
 function shareDriveHint() {
   if (S._noDrive) return;   /* 「导出(无需上传共享盘)」:只导文件,不打开共享盘 */
@@ -4829,6 +5126,7 @@ async function importPackage(file) {
     await loadAll(); await validateMe(); applyMe(); rerender();
     if (S.gateOpen) renderGate();
     toast("✅ 数据包已载入: " + ((d.cfg && d.cfg.cycleLabel) || ""));
+    fcAudit("导入数据包", ((d.cfg && d.cfg.cycleLabel) || "") + " · 代表" + (d.forecasts || []).length + "人");
   } catch (e) {
     console.error("importPackage:", e);
     toast("⚠ 写入存储失败: " + (e && e.message || e) + " — 可能是存储空间满了,试试清空数据后重试");
@@ -4836,19 +5134,20 @@ async function importPackage(file) {
 }
 function openClearAll() {
   openModal("⚠ 清空全部数据",
-    '<p>将删除:导入的主数据、<b>全部代表的预估与备注</b>、全部版本快照与配置。<b style="color:var(--red)">不可恢复。</b></p><p style="margin-top:8px">请输入「清空」两个字确认:</p><input class="ctrl" id="clr-word" style="width:100%;margin-top:6px">',
+    '<p>将删除:导入的主数据、<b>全部代表的预估与备注</b>、全部版本快照与配置。<b style="color:var(--red)">不可恢复。</b>(清空前会自动生成一份快照,紧急时可在「数据快照」中回滚)</p><p style="margin-top:8px">请输入「清空」两个字确认:</p><input class="ctrl" id="clr-word" style="width:100%;margin-top:6px">',
     '<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="clr-ok">永久清空</button>');
   $("#clr-ok").onclick = async () => {
     if ($("#clr-word").value.trim() !== "清空") { toast("输入不匹配"); return; }
     closeModal(); toast("正在清空 …");
-    for (const k of await Store.list("fc-")) await Store.del(k);
+    try { await fcRunBackup("清空前", true); } catch (e) {}   /* ★ 清空前自动快照,误清可从管理后台回滚 */
+    for (const k of await Store.list("fc-")) { if (k.indexOf("fc-backup") === 0 || k.indexOf("fc-audit") === 0) continue; await Store.del(k); }
     Passwords._cache = {}; Passwords._loaded = true; await Store.set("fc-passwords", {});
     S.cfg = null; S.master = null; S.idx.clear(); S.repInfo.clear(); S.fcs.clear(); S.verCache.clear();
     S.dashComments = {};
     S.mgr = { updatedAt: 0, rows: {} }; S._mgrDirty = false;
     S.curRep = ""; S.dash.cmp = "latest"; S.dash.cmpId = "";
     if (S.me && S.me.role !== "admin") { S.me = null; await Store.pdel("fc-me"); }
-    applyMe(); rerender(); toast("已全部清空");
+    applyMe(); rerender(); toast("已全部清空"); fcAudit("清空全部数据", "已自动保留清空前快照,可回滚");
   };
 }
 
@@ -4920,7 +5219,7 @@ function openClearMgr() {
     const n = await clearMgrBy(dim, val);
     if (n < 0) { toast("⚠ 清除失败,请重试"); return; }
     rerender();
-    toast(n ? "已清除 " + label + ":移除 " + n + " 行管理调整,恢复代表原值" : "没有匹配的管理调整");
+    toast(n ? "已清除 " + label + ":移除 " + n + " 行管理调整,恢复代表原值" : "没有匹配的管理调整"); if (n) fcAudit("清除管理调整", label + " · " + n + "行");
   };
 }
 
@@ -5508,6 +5807,7 @@ function renderAdmin() {
     '</div>' +
     '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:<b>代表必须输入本人登录密码</b>,未设密码的代表无法进入(密码加密保存,无法回看,忘记只能重置);DSM/RSM 先用个人密码,未设则用通用口令。重置/清除密码后,对应人员已记住的身份会自动失效,需重新登录。密码以加密哈希形式保存在本机;若团队多机使用,改完密码后请通过「导出数据包」经共享盘分发给团队,对方导入后生效。</p>' +
+    '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">🗄 数据快照与操作日志</b> <span class="hint">每 7 天自动快照(保留 4 份,含主预估/鞘/光纤),误操作可一键回滚;导入/清空/回滚等关键操作自动留痕</span><div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm pri" id="btn-bk-list">🗄 查看快照 / 回滚</button><button class="btn sm" id="btn-bk-now">⚡ 立即快照</button><button class="btn sm" id="btn-audit-list">📜 操作日志</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">💬 用户反馈</b> <span class="hint">全员可通过右下角「💬 反馈」按钮提交建议/Bug/数据问题</span><div style="margin-top:6px"><button class="btn sm pri" id="btn-fb-list">查看反馈列表</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="ad-clearmgr">🧹 清除管理调整数据</button><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:6px 0 0">「清除管理调整」只移除 DSM/RSM/管理员的橙色调整,可按 人员 / 产品组 / 省份 选择性清除,代表原始提交保留;「清空全部数据」则删除所有数据。</p></div></div>';
@@ -5683,6 +5983,10 @@ function renderAdmin() {
   });
   $("#ad-clear").onclick = openClearAll;
   if ($("#btn-fb-list")) $("#btn-fb-list").onclick = openFbList;
+  if ($("#btn-bk-list")) $("#btn-bk-list").onclick = openBkList;
+  if ($("#btn-bk-now")) $("#btn-bk-now").onclick = async () => { toast("正在生成快照…"); const r = await fcRunBackup("手动"); if (r) toast("✅ 快照完成(" + r.n + " 个文档 · 管理后台「查看快照」可回滚)"); };
+  if ($("#btn-audit-list")) $("#btn-audit-list").onclick = openAuditList;
+  fcAutoBackupCheck();   /* 管理员打开后台时也触发每周自动快照检查 */
   if ($("#ad-clearmgr")) $("#ad-clearmgr").onclick = openClearMgr;
   /* ★ Supabase 配置绑定 */
   if ($("#sb-save")) $("#sb-save").onclick = () => {
@@ -6276,6 +6580,7 @@ function switchTab(t) {
   flushDirtyReps(false);
   S.tab = t;
   $$(".tabs .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  if (t !== "fill"){ const mb = document.getElementById("mob-savebar"); if (mb) mb.remove(); }
   $("#tab-fill").style.display = t === "fill" ? "" : "none";
   $("#tab-progress").style.display = t === "progress" ? "" : "none";
   $("#tab-dash").style.display = t === "dash" ? "" : "none";
@@ -6507,6 +6812,7 @@ async function syncLatestInBackground() {
       S.me = await Store.pget("fc-me"); await validateMe();
       if (S.me && S.me.role === "rep") S.curRep = S.me.name;
       applyMe(); rerender(); if (!S.me && !S.gateOpen) renderGate();
+      fcAutoBackupCheck();   /* ★ 管理员在线:每周自动快照检查(距上次>7天才会真正备份) */
     } else if (cloudMode()) {
       const ok = await cloudPull(false);    // 内部含 loadAll;有更新才返回 true
       if (ok) { applyMe(); rerender(); if (typeof renderCtx === "function") renderCtx(); if (!S.me && !S.gateOpen) renderGate(); }
@@ -8379,7 +8685,7 @@ function importPkg(){
       if(p.fcBase){ S.fcBase=p.fcBase; S.fcMeta=p.fcMeta||null; S.fcCfg=p.fcCfg||S.fcCfg; } if(p.fcFill) S.fcFill=p.fcFill; if(p.shareDriveUrl!=null) S.shareDriveUrl=p.shareDriveUrl;
       await saveBase(); await saveFill(); await saveVersions(); await savePasswords();
       if(p.fcBase||p.fcFill) { await saveFcBase(); await saveFcFill(); } if(p.shareDriveUrl!=null) await Store.set("zsr-sharedrive", S.shareDriveUrl);
-      toast("已导入数据包"); rerender();
+      toast("已导入数据包"); try { window.fcAudit && window.fcAudit("鞘模块导入数据包", (S.base || []).length + "行名录"); } catch(e){} rerender();
     } catch(err){ toast("⚠ 解析失败:"+err.message); } };
     rd.readAsText(f); };
   inp.click();
@@ -9147,7 +9453,7 @@ async function importFcFromText(text){
   const recs=[];
   for(let i=1;i<lines.length;i++){ const cells=lines[i].split(sep); const g=idx=>idx>=0?(cells[idx]??"").trim():"";
     recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),product:g(C.product),month:g(C.month),aopA:g(C.aopA),actA:g(C.actA),lyA:g(C.lyA),aopQ:g(C.aopQ),actQ:g(C.actQ),lyQ:g(C.lyQ) }); }
-  if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); rerender(); }
+  if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
 }
 function handleFcXlsx(file){
   const reader=new FileReader();
@@ -9163,7 +9469,7 @@ function handleFcXlsx(file){
       const recs=[];
       for(let i=hr+1;i<arr.length;i++){ const cells=arr[i]; const g=idx=>idx>=0?cells[idx]:""; if(!String(g(C.hospCode)).trim()&&!String(g(C.product)).trim()) continue;
         recs.push({ region:g(C.region),manager:g(C.manager),rep:g(C.rep),province:g(C.province),hospName:g(C.hospName),hospCode:g(C.hospCode),product:g(C.product),month:g(C.month),aopA:g(C.aopA),actA:g(C.actA),lyA:g(C.lyA),aopQ:g(C.aopQ),actQ:g(C.actQ),lyQ:g(C.lyQ) }); }
-      if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); rerender(); }
+      if(fcIngest(recs)){ await saveFcBase(); await saveFcFill(); toast("已导入鞘预估 "+S.fcBase.length+" 行"); try { window.fcAudit && window.fcAudit("鞘模块导入预估", S.fcBase.length + "行"); } catch(e){} rerender(); }
     }catch(err){ console.error(err); toast("⚠ 解析失败:"+err.message); }
   };
   reader.readAsArrayBuffer(file);
@@ -10307,6 +10613,7 @@ function importXlsx(file, region){
       let _org=null; try{ _org=fbrOrgFix(S.base); }catch(_e){}
       await Store.set("fbr-base",{rows:S.base}); await Store.set("fbr-fill",S.fill); await Store.set("fbr-cfg",S.cfg);
       toast("✅ "+region+" 导入完成:"+sheetName+" · 更新"+upd+"行 · 新增"+added+"行"+(seeded?" · 吸收已填"+seeded+"行":"")+(_org&&_org.ok&&(_org.renamed||_org.refreshed)?" · 架构同步"+(_org.renamed+_org.refreshed)+"行":""));
+      try { window.fcAudit && window.fcAudit("光纤模块导入("+region+")", sheetName + " · 更新" + upd + "行 · 新增" + added + "行"); } catch(e){}
       rerender(); if(typeof window.__fcRefreshFbrTab==="function") try{window.__fcRefreshFbrTab()}catch(_e){}
     }catch(err){ console.error(err); toast("⚠ 导入失败:"+err.message); }
   };
