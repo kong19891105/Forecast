@@ -1585,7 +1585,57 @@ const GRP_ORDER = [
 /* 鞘入院模块并入看板/报表的两条新产品线(与主模块「老鞘」是不同产品)。 */
 const ZSR_LINES = ["ZSR鞘", "Anrei鞘"];
 const ZSR_MASTER_GRPS = ["ZSR测压鞘", "Anrei负压鞘"]; /* 鞘业务唯一来源=鞘模块:主数据导入自动排除+条目层兜底过滤,防止与桥接重复计入 */
-window.__fcDbg = { get onXlsxFile(){ return onXlsxFile; }, get commitImport(){ return commitImport; }, get aggregateRows(){ return aggregateRows; }, get detectCols(){ return detectCols; }, get exportRepXlsx(){ return exportRepXlsx; }, get exportRepsXlsx(){ return exportRepsXlsx; }, get exportDashXlsx(){ return exportDashXlsx; }, get rollup(){ return rollup; }, get dashReportEntries(){ return dashReportEntries; } }; /* 自动化测试/运维钩子 */
+window.__fcDbg = { get onXlsxFile(){ return onXlsxFile; }, get commitImport(){ return commitImport; }, get aggregateRows(){ return aggregateRows; }, get detectCols(){ return detectCols; }, get exportRepXlsx(){ return exportRepXlsx; }, get exportRepsXlsx(){ return exportRepsXlsx; }, get exportDashXlsx(){ return exportDashXlsx; }, get rollup(){ return rollup; }, get dashReportEntries(){ return dashReportEntries; }, get S(){ return S; } }; /* 自动化测试/运维钩子 */
+
+/* =================== 💬 用户反馈(建议/Bug/数据问题) ===================
+   入口:右下角悬浮按钮,全模块可见;每条反馈独立键 fc-fb-* 写入云端(互不覆盖);管理后台可查看/标记处理。 */
+function openFeedback(){
+  const me = S.me ? (S.me.name || S.me.rep || "") : "";
+  openModal("💬 意见反馈",
+    '<div class="field"><label>类型</label><div style="display:flex;gap:14px;margin-top:4px">' + ["建议","Bug","数据问题"].map((t,i)=>'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="radio" name="fbt" value="'+t+'"'+(i===0?" checked":"")+'>'+t+'</label>').join("") + '</div></div>' +
+    '<div class="field" style="margin-top:10px"><label>描述(请尽量写明:哪个界面 / 哪个医院·产品·月份 / 期望是什么)</label><textarea id="fb-text" class="ctrl" style="width:100%;height:110px;resize:vertical"></textarea></div>' +
+    '<p class="hint" style="margin-top:6px">提交人:' + esc(me || "未登录") + ' · 当前页签:' + esc(S.tab || "") + ' · 时间与版本将自动附带,管理员在后台可见。</p>',
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="fb-send">提交</button>');
+  $("#fb-send").onclick = async () => {
+    const txt = ($("#fb-text").value || "").trim();
+    if (!txt){ toast("请填写描述"); return; }
+    $("#fb-send").disabled = true;
+    const type = (document.querySelector("input[name=fbt]:checked") || {}).value || "建议";
+    const item = { type, text: txt, name: me, role: S.me ? S.me.role : "", tab: S.tab || "", at: Date.now(), ua: navigator.userAgent.slice(0, 90), done: false };
+    const key = "fc-fb-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    const ok = await Store.set(key, item);
+    if (ok === false){ toast("⚠ 云端提交失败(网络?),请稍后重试 — 内容保留在输入框"); $("#fb-send").disabled = false; return; }
+    closeModal(); toast("✅ 已收到反馈,谢谢!");
+  };
+}
+async function openFbList(){
+  toast("加载反馈…");
+  let keys = [];
+  try { keys = (await Store.list("fc-fb-")).sort().reverse(); } catch(e){}
+  const items = [];
+  for (const k of keys.slice(0, 200)){ const v = await Store.get(k); if (v && v.text) items.push(Object.assign({ _k: k }, v)); }
+  const undone = items.filter(x => !x.done).length;
+  let b = items.length
+    ? '<div style="max-height:400px;overflow:auto"><table class="dt" style="font-size:12.5px;width:100%"><tr><th>时间</th><th>类型</th><th>提交人</th><th>页签</th><th class="l">内容</th><th>操作</th></tr>' +
+      items.map(x => '<tr' + (x.done ? ' style="opacity:.55"' : '') + '><td>' + new Date(x.at).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) + '</td><td>' + esc(x.type) + '</td><td>' + esc(x.name || "-") + '</td><td>' + esc(x.tab || "") + '</td><td class="l" style="white-space:pre-wrap;max-width:360px">' + esc(x.text) + '</td><td><button class="btn sm ' + (x.done ? '' : 'pri') + '" data-fbk="' + esc(x._k) + '" data-fbd="' + (x.done ? 1 : 0) + '">' + (x.done ? '恢复未处理' : '标记已处理') + '</button></td></tr>').join("") + '</table></div>'
+    : '<p class="hint">还没有收到反馈。</p>';
+  openModal("💬 用户反馈(" + items.length + " 条,待处理 " + undone + ")", b, '<button class="btn pri" onclick="closeModal()">关闭</button>');
+  $$("#modal [data-fbk]").forEach(btn => btn.onclick = async () => {
+    const v = await Store.get(btn.dataset.fbk); if (!v) return;
+    v.done = btn.dataset.fbd !== "1";
+    await Store.set(btn.dataset.fbk, v);
+    openFbList();
+  });
+}
+(function initFbFab(){
+  try {
+    const b = document.createElement("button");
+    b.id = "fb-fab"; b.textContent = "💬 反馈"; b.title = "提交建议 / Bug / 数据问题";
+    b.style.cssText = "position:fixed;right:14px;bottom:70px;z-index:9998;background:#2054E0;color:#fff;border:0;border-radius:999px;padding:9px 15px;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(32,84,224,.35);cursor:pointer";
+    b.onclick = openFeedback;
+    document.body.appendChild(b);
+  } catch(e){}
+})();
 function grpSortKey(g) {
   const i = GRP_ORDER.indexOf(g);
   return i >= 0 ? String(i).padStart(3, "0") : "999" + g;
@@ -1714,7 +1764,62 @@ function zsrMergedEntries() {
   catch (e) { console.error("鞘预估合并失败:", e); return []; }
 }
 /* 看板/报表专用数据源:主条目 + 鞘条目(rawOnly 透传给主模块;鞘无管理调整层,两口径相同) */
-function dashReportEntries(rawOnly) { return buildEntries(rawOnly).concat(zsrMergedEntries()); }
+/* ★ 支架VBP占位指标隐藏:以下省份已执行支架VBP、指标为真;其余省份的支架类 7-12月指标为占位值,
+   勾选开关后在 看板/管理报表 及其导出中按 0 处理(仅视图层克隆,云端与内存主数据一字不动)。
+   新省份执行VBP后,在名单中添加省份全名即可。 */
+const VBP_EXEC_PROVS = new Set(["江西省","广西壮族自治区","湖南省","贵州省","内蒙古自治区","河南省","重庆市","辽宁省","陕西省","吉林省"]);
+/* NVBP省份(不参与支架带量采购,指标为真) — 默认同样不隐藏 */
+const VBP_NVBP_PROVS = new Set(["上海市","山东省","北京市","广东省"]);
+function vbpHideOn(){ try { return localStorage.getItem("fc-vbphide") === "1"; } catch (e) { return false; } }
+function setVbpHide(on){ try { localStorage.setItem("fc-vbphide", on ? "1" : "0"); } catch (e) {} }
+/* 自定义隐藏省份集合;未自定义(null)时 = 默认口径(10个已执行省之外的全部支架省份) */
+function vbpCustomProvs(){ try { const s = localStorage.getItem("fc-vbphide-provs"); return s ? new Set(JSON.parse(s)) : null; } catch (e) { return null; } }
+function setVbpProvs(arr){ try { if (arr == null) localStorage.removeItem("fc-vbphide-provs"); else localStorage.setItem("fc-vbphide-provs", JSON.stringify(arr)); } catch (e) {} }
+function vbpAllProvs(){ const s = new Set(); for (const r of S.idx.values()) if (r.grp === "支架" || r.grp === "支架-NVBP省份") s.add(r.prov); return [...s].sort((a, b) => a.localeCompare(b, "zh")); }
+function vbpHiddenSet(){ const c = vbpCustomProvs(); if (c) return c; return new Set(vbpAllProvs().filter(p => !VBP_EXEC_PROVS.has(p) && !VBP_NVBP_PROVS.has(p))); }
+function vbpIsHidden(prov){ return vbpHiddenSet().has(prov); }
+function applyVbpHide(list){
+  if (!vbpHideOn()) return list;
+  const hideSet = vbpHiddenSet();
+  return list.map(e => {
+    if ((e.grp === "支架" || e.grp === "支架-NVBP省份") && hideSet.has(e.prov) && e.row && e.row.aopA){
+      const row2 = Object.assign({}, e.row, { aopA: e.row.aopA.map((v, i) => i >= 6 ? 0 : v), aopQ: (e.row.aopQ || []).map((v, i) => i >= 6 ? 0 : v) });
+      return Object.assign({}, e, { row: row2,
+        aop: row2.aopA.reduce((x, y) => x + (y || 0), 0),
+        aopQ: row2.aopQ.reduce((x, y) => x + (y || 0), 0) });
+    }
+    return e;
+  });
+}
+function dashReportEntries(rawOnly) { return applyVbpHide(buildEntries(rawOnly).concat(zsrMergedEntries())); }
+/* 省份筛选面板:勾选=隐藏该省支架7-12指标。默认=10个已执行省之外全部;自定义后本机记忆,可一键恢复默认 */
+function openVbpProvModal(){
+  const provs = vbpAllProvs();
+  const cur = vbpHiddenSet();
+  let b = '<p style="font-size:13px;color:var(--ink2);line-height:1.7">勾选的省份,其<b>支架类 7-12月指标</b>在看板/报表/导出中按 0 处理(云端数据不变)。默认隐藏=除「已执行VBP的10省(绿标)」和「NVBP省份(蓝标:上海/山东/北京/广东)」之外的全部——这两类省份的指标为真,默认不隐藏。</p>';
+  b += '<div style="margin:8px 0 10px;display:flex;gap:8px"><button class="btn sm" id="vbp-def">恢复默认(执行VBP+NVBP省之外)</button><button class="btn sm" id="vbp-all">全选</button><button class="btn sm" id="vbp-none">全不选</button></div>';
+  b += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:320px;overflow:auto">';
+  for (const p of provs){
+    b += '<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:5px 8px"><input type="checkbox" class="vbp-p" value="' + esc(p) + '"' + (cur.has(p) ? " checked" : "") + '> ' + esc(p) + (VBP_EXEC_PROVS.has(p) ? ' <span style="font-size:10.5px;background:#E7F6EC;color:#1F7A40;border-radius:99px;padding:0 6px">已执行VBP</span>' : (VBP_NVBP_PROVS.has(p) ? ' <span style="font-size:10.5px;background:#EAF1FF;color:#2054E0;border-radius:99px;padding:0 6px">NVBP省份</span>' : '')) + '</label>';
+  }
+  b += '</div>';
+  openModal("支架VBP指标 · 省份筛选", b,
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" id="vbp-apply">应用</button>');
+  const boxes = () => [...document.querySelectorAll("#modal .vbp-p")];
+  const defSet = new Set(provs.filter(p => !VBP_EXEC_PROVS.has(p) && !VBP_NVBP_PROVS.has(p)));
+  $("#vbp-def").onclick = () => boxes().forEach(cb => cb.checked = defSet.has(cb.value));
+  $("#vbp-all").onclick = () => boxes().forEach(cb => cb.checked = true);
+  $("#vbp-none").onclick = () => boxes().forEach(cb => cb.checked = false);
+  $("#vbp-apply").onclick = () => {
+    const sel = boxes().filter(cb => cb.checked).map(cb => cb.value);
+    const isDef = sel.length === defSet.size && sel.every(p => defSet.has(p));
+    setVbpProvs(isDef ? null : sel);
+    setVbpHide(true);
+    closeModal();
+    if (S.tab === "report" && typeof renderReport === "function") renderReport(); else if (typeof renderDash === "function" && S.tab === "dash") renderDash(); else rerender();
+    toast("已应用:隐藏 " + sel.length + " 个省份的支架7-12月指标" + (isDef ? "(默认口径)" : "(自定义)"));
+  };
+}
 
 function scopeReps() {
   const all = [...new Set([...S.idx.values()].map(r => r.rep))];
@@ -3091,7 +3196,7 @@ function exportUnsubXlsx(repStatus) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "未交名单");
   XLSX.writeFile(wb, "未交名单_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".xlsx");
-  toast("已导出未交名单 " + unsub.length + " 人"); shareDriveHint();
+  toast("已导出未交名单 " + unsub.length + " 人");
 }
 
 /* =====================================================================
@@ -3176,6 +3281,7 @@ async function renderDash() {
   let html = uncatBannerHtml() + '<div class="card"><div class="card-h"><h3>筛选与口径</h3>' +
     '<div class="seg" id="dim-seg">' + Object.keys(dimDefs).map(k => '<button data-d="' + k + '" class="' + (d.dim === k ? "on" : "") + '">' + dimDefs[k].name + "</button>").join("") + "</div>" +
     '<div class="seg" id="met-seg"><button data-m="amt" class="' + (d.metric === "amt" ? "on" : "") + '">金额 K</button><button data-m="qty" class="' + (d.metric === "qty" ? "on" : "") + '">数量</button></div>' +
+    '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px" title="已执行支架VBP(指标为真)的10省:江西/广西/湖南/贵州/内蒙古/河南/重庆/辽宁/陕西/吉林。其余省份的支架类7-12月指标为占位值,勾选后看板/报表及导出按0处理;云端数据不变。点「选省份」可自定义隐藏哪些省。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-dash" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>' +
     '<div class="seg" id="dash-period-seg">' + PERIODS.map(p => '<button data-p="' + p.key + '" class="' + (dp === p.key || (p.key === "YTD" && dp.startsWith("YTD")) ? "on" : "") + '">' + p.key + '</button>').join('') + '</div>' +
     '<select class="ctrl" id="dash-ytd" style="width:80px;margin-left:4px;' + (dp.startsWith("YTD") ? "" : "display:none") + '">' + MN.map((m, i) => '<option value="' + (i + 1) + '"' + (dp === "YTD-" + (i + 1) ? " selected" : "") + '>' + m + '</option>').join('') + '</select>' +
     '<select class="ctrl" id="rsm-f"><option value="">全部大区</option>' + rsms.map(r => '<option' + (d.rsm === r ? " selected" : "") + ">" + esc(r) + "</option>").join("") + "</select>" +
@@ -3458,6 +3564,8 @@ async function renderDash() {
      无效/不兼容的已选值会在重渲染时由上方「筛选联动」逻辑自动剔除。 */
   $("#dim-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.dim = b.dataset.d; d.open.clear(); renderDash(); } };
   $("#met-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.metric = b.dataset.m; renderDash(); } };
+  if ($("#vbp-hide-dash")) $("#vbp-hide-dash").onchange = e => { setVbpHide(e.target.checked); renderDash(); };
+  if ($("#vbp-prov-dash")) $("#vbp-prov-dash").onclick = () => openVbpProvModal();
   $("#dash-period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!d.period.startsWith("YTD")) d.period = "YTD-" + ytdCutMonth(); } else { d.period = b.dataset.p; } renderDash(); } };
   if ($("#dash-ytd")) $("#dash-ytd").onchange = e => { d.period = "YTD-" + e.target.value; renderDash(); };
   $("#rsm-f").onchange = e => { d.rsm = e.target.value; renderDash(); };
@@ -3646,12 +3754,15 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
   const K = v => Math.round(v / 100) / 10; // 千元1位
   const P = v => v === null || !isFinite(v) ? null : Math.round(v * 1000) / 10; // %1位
   const d = S.dash;
+  const isQty = d.metric === "qty";  /* ★ 导出跟随看板「金额/数量」切换 */
+  const U = isQty ? "件" : "K";
+  const KV = v => isQty ? Math.round(v * 10) / 10 : Math.round(v / 100) / 10;
   const dp = d.period || "FY";
   const msX = getPeriodMonths(dp);
   const pS = periodShort(dp);
   const actSetX = new Set(S.cfg.actMonths || []);
-  const head1 = [dimDefs[d.dim].name, "YTD Ach%", pS + "预估K", pS + " AOP K", "Ach%", "预估差异K", "预估准确率%", "上版" + pS + " K", "Δ" + pS + " K", "ΔAch pp", "填写进度%", "备注条数", "管理备注"];
-  const aoa1 = [["周期", S.cfg.cycleLabel, "期间", pS, "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
+  const head1 = [dimDefs[d.dim].name, "YTD Ach%", pS + "预估" + U, pS + " AOP " + U, "Ach%", "预估差异K(金额)", "预估准确率%(金额)", "上版" + pS + " K(金额)", "Δ" + pS + " K(金额)", "ΔAch pp", "填写进度%", "备注条数", "管理备注"];
+  const aoa1 = [["周期", S.cfg.cycleLabel, "期间", pS, "口径", isQty ? "数量(件)" : "金额(千元K)", "导出时间", new Date().toLocaleString("zh-CN"), verMeta ? "对比版本:" + verMeta.label : "无版本对比"], head1];
   const vRoll = ver ? rollupVer(ver, d.dim, d.rsm, msX, makeDashVerPred(d)) : null;
   /* ★ 产品维度:按「产品类别」排序,并在每个类别末尾插入小计行(光纤耗材/结石耗材/妇女健康…),与界面一致 */
   let _rowsX = rows, _subAt = null;
@@ -3667,44 +3778,46 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
   }
   for (const r of _rowsX) {
     let rFy = 0, rAop = 0, rLy = 0, ytdAct = 0, ytdAop = 0;
-    for (const i of msX) { rFy += r.m[i]; rAop += r.aopA[i]; rLy += r.lyA[i]; if (actSetX.has(i + 1)) { ytdAct += r.m[i]; ytdAop += r.aopA[i]; } }
+    const _mA = isQty ? (r.mq || []) : r.m, _oA = isQty ? (r.aopQ2 || []) : r.aopA, _lA = isQty ? (r.lyQ2 || []) : r.lyA;
+    for (const i of msX) { rFy += _mA[i] || 0; rAop += _oA[i] || 0; rLy += _lA[i] || 0; if (actSetX.has(i + 1)) { ytdAct += _mA[i] || 0; ytdAop += _oA[i] || 0; } }
     const ach = rAop > 0 ? rFy / rAop : null, gr = rLy > 0 ? rFy / rLy - 1 : null;
     const vr = vRoll ? vRoll.get(r.dim) : null;
     const vach = vr && rAop > 0 ? vr.fy / rAop : null, vgr = vr && rLy > 0 ? vr.fy / rLy - 1 : null;
     const rAcc = ver ? calcVerAccuracyForItems(r.items, ver, msX) : null;
-    aoa1.push([r.dim, P(ytdAop > 0 ? ytdAct / ytdAop : null), K(rFy), K(rAop), P(ach),
-      rAcc ? K(rAcc.diff) : null, rAcc ? P(rAcc.acc) : null,
-      vr ? K(vr.fy) : null, vr ? K(rFy - vr.fy) : null,
-      ach !== null && vach !== null ? P(ach - vach) : null,
+    aoa1.push([r.dim, P(ytdAop > 0 ? ytdAct / ytdAop : null), KV(rFy), KV(rAop), P(ach),
+      (!isQty && rAcc) ? K(rAcc.diff) : null, (!isQty && rAcc) ? P(rAcc.acc) : null,
+      (!isQty && vr) ? K(vr.fy) : null, (!isQty && vr) ? K(rFy - vr.fy) : null,
+      (!isQty && ach !== null && vach !== null) ? P(ach - vach) : null,
       r.openTotal ? Math.round(r.openFilled / r.openTotal * 100) : 100, r.rms.length, getDashComment(d.dim + "|" + r.dim)]);
     const _s = _subAt && _subAt.get(r);
     if (_s) {
       let sFy = 0, sAop = 0, sLy = 0, sYa = 0, sYo = 0, oT = 0, oF = 0, nR = 0, sV = 0, anyV = false; const _items = [];
       for (const m of _s.mem) {
-        for (const i of msX) { sFy += m.m[i]; sAop += m.aopA[i]; sLy += m.lyA[i]; if (actSetX.has(i + 1)) { sYa += m.m[i]; sYo += m.aopA[i]; } }
+        const _ma = isQty ? (m.mq || []) : m.m, _oa = isQty ? (m.aopQ2 || []) : m.aopA, _la = isQty ? (m.lyQ2 || []) : m.lyA;
+        for (const i of msX) { sFy += _ma[i] || 0; sAop += _oa[i] || 0; sLy += _la[i] || 0; if (actSetX.has(i + 1)) { sYa += _ma[i] || 0; sYo += _oa[i] || 0; } }
         oT += m.openTotal || 0; oF += m.openFilled || 0; nR += (m.rms && m.rms.length) || 0;
         if (m.items) _items.push(...m.items);
         const v0 = vRoll ? vRoll.get(m.dim) : null; if (v0) { sV += v0.fy; anyV = true; }
       }
       const sAch = sAop > 0 ? sFy / sAop : null;
       const sAcc = ver ? calcVerAccuracyForItems(_items, ver, msX) : null;
-      aoa1.push(["★ " + _s.cat + " 小计", P(sYo > 0 ? sYa / sYo : null), K(sFy), K(sAop), P(sAch),
-        sAcc ? K(sAcc.diff) : null, sAcc ? P(sAcc.acc) : null,
-        anyV ? K(sV) : null, anyV ? K(sFy - sV) : null, null,
+      aoa1.push(["★ " + _s.cat + " 小计", P(sYo > 0 ? sYa / sYo : null), KV(sFy), KV(sAop), P(sAch),
+        (!isQty && sAcc) ? K(sAcc.diff) : null, (!isQty && sAcc) ? P(sAcc.acc) : null,
+        (!isQty && anyV) ? K(sV) : null, (!isQty && anyV) ? K(sFy - sV) : null, null,
         oT ? Math.round(oF / oT * 100) : 100, nR, ""]);
     }
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), "汇总-" + dimDefs[d.dim].name.slice(0, 4));
   /* 明细 */
-  const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " K"), "FY预估K", "FY AOP K", "Ach%", "预估差异K", "预估准确率%", "上版FY K", "ΔFY K", "FY代表原始K", "管理调整月数", "备注", "管理备注"]];
+  const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " " + U), "FY预估" + U, "FY AOP " + U, "Ach%", "预估差异K(金额)", "预估准确率%(金额)", "上版FY K(金额)", "ΔFY K(金额)", "FY代表原始K(金额)", "管理调整月数", "备注", "管理备注"]];
   for (const e of entries.slice().sort((a, b) => a.rsm.localeCompare(b.rsm, "zh") || a.rep.localeCompare(b.rep, "zh") || b.fy - a.fy)) {
     const vr = verRowOf(ver, e.key);
     const eAcc = ver ? calcVerAccuracyForItems([e], ver, msX) : null;
-    aoa2.push([e.rsm, e.dsm, e.rep, e.prov, e.grp, ...e.m.map(c => K(c.a)),
-      K(e.fy), K(e.aop), P(e.aop > 0 ? e.fy / e.aop : null),
-      eAcc ? K(eAcc.diff) : null, eAcc ? P(eAcc.acc) : null,
-      vr ? K(vr.fy) : null, vr ? K(e.fy - vr.fy) : null,
-      K(e.m.reduce((s, c, i) => s + entryRepA(e, i), 0)), e.ovCount || 0, e.rm || "", getDashComment("entry|" + e.key)]);
+    aoa2.push([e.rsm, e.dsm, e.rep, e.prov, e.grp, ...e.m.map(c => KV(isQty ? (c.q || 0) : c.a)),
+      KV(isQty ? e.fyq : e.fy), KV(isQty ? e.aopQ : e.aop), P((isQty ? e.aopQ : e.aop) > 0 ? (isQty ? e.fyq / e.aopQ : e.fy / e.aop) : null),
+      (!isQty && eAcc) ? K(eAcc.diff) : null, (!isQty && eAcc) ? P(eAcc.acc) : null,
+      (!isQty && vr) ? K(vr.fy) : null, (!isQty && vr) ? K(e.fy - vr.fy) : null,
+      isQty ? null : K(e.m.reduce((s, c, i) => s + entryRepA(e, i), 0)), e.ovCount || 0, e.rm || "", getDashComment("entry|" + e.key)]);
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), "全部明细");
   /* 管理调整对照: 逐月保留 代表原始提交 与 DSM/大区/管理员调整后 两个版本 */
@@ -3739,7 +3852,7 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
     if (cmt) aoa4.push(["明细", e.rep + " · " + e.prov + " · " + e.grp, cmt]);
   }
   if (aoa4.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa4), "管理备注清单");
-  XLSX.writeFile(wb, "预估看板_" + S.cfg.cycleLabel + ".xlsx"); shareDriveHint();
+  XLSX.writeFile(wb, "预估看板_" + S.cfg.cycleLabel + (isQty ? "_数量" : "") + ".xlsx"); toast("已导出看板 Excel(不再自动打开共享盘)");
 }
 
 /* =================== 弹窗 =================== */
@@ -4491,7 +4604,7 @@ async function exportRepXlsx(repArg) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(daoa), "_FCDATA");
   try { wb.Workbook = { Sheets: wb.SheetNames.map(n => ({ Hidden: n === "_FCDATA" ? 1 : 0 })) }; } catch (e) {}
   XLSX.writeFile(wb, "预估_" + rep.replace(/[\\/:*?"<>|]/g, "_") + "_" + stamp() + ".xlsx");
-  toast(S._noDrive ? "已导出「" + rep + "」的预估 Excel 明细(无需上传)" : "已生成「" + rep + "」的预估文件，请上传到公司共享盘"); shareDriveHint();
+  toast("已导出「" + rep + "」的预估 Excel 明细");
 }
 
 /* 当前填写视图涉及的代表集合(用于"提交预估到共享盘"按视图导出) */
@@ -4579,7 +4692,7 @@ async function exportRepsXlsx(reps, label) {
   try { wb.Workbook = { Sheets: wb.SheetNames.map(n => ({ Hidden: n === "_FCDATA" ? 1 : 0 })) }; } catch (e) {}
   const base = "预估_" + String(label || "多代表").replace(/[\\/:*?"<>|]/g, "_") + "_" + reps.length + "人";
   XLSX.writeFile(wb, base + "_" + stamp() + ".xlsx");
-  toast(S._noDrive ? "已导出预估 Excel 明细(" + reps.length + "人,无需上传)" : "已生成预估文件(" + reps.length + "人)，请上传到公司共享盘"); shareDriveHint();
+  toast("已导出预估 Excel 明细(" + reps.length + "人)");
 }
 
 /* =================== 代表预估 Excel 导入(管理员多选合并) =================== */
@@ -4696,7 +4809,7 @@ async function exportPackage() {
   const pw = await Passwords.export();
   downloadJSON("预估数据包_" + (S.cfg.cycleLabel || "") + "_" + stamp() + ".json",
     { kind: "fc-package", exportedAt: Date.now(), cfg: cfgOut, master: S.master, forecasts: [...S.fcs.values()], versions, passwords: pw, dashComments: S.dashComments || {}, mgrAdjust: S.mgr || { updatedAt: 0, rows: {} } });
-  toast("数据包已导出"); shareDriveHint();
+  toast("数据包已导出");
 }
 async function importPackage(file) {
   try {
@@ -4987,6 +5100,7 @@ async function renderReport() {
     '<option value=""' + (!r.cmpId ? " selected" : "") + '>不对比</option>' +
     vsAll.slice().reverse().map(v => '<option value="' + esc(v.id) + '"' + (r.cmpId === v.id ? " selected" : "") + '>' + esc(v.label || v.id) + (v.savedAt ? " · " + dt(v.savedAt) : "") + '</option>').join("") +
     '</select></div>';
+  h += '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px;align-self:flex-end" title="已执行支架VBP的10省指标为真,其余省份支架7-12月指标为占位值;勾选后按0处理,与看板联动,云端数据不变。点「选省份」自定义。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-rep" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-rep" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>';
   h += '<button class="btn pri sm" id="rep-exp-xlsx" style="margin-left:auto;align-self:flex-end">\u2b07 导出 Excel</button>';
   h += '</div>';
   h += '<div class="hint" style="margin-top:10px;line-height:1.7">范围:' + esc(scopeLabel()) +
@@ -5163,24 +5277,27 @@ async function renderReport() {
   };
   document.addEventListener("click", S._reportClickHandler);
   if ($("#rep-drill-clear")) $("#rep-drill-clear").onclick = () => { r.drillFilters = {}; renderReport(); };
+  if ($("#vbp-hide-rep")) $("#vbp-hide-rep").onchange = e => { setVbpHide(e.target.checked); renderReport(); };
+  if ($("#vbp-prov-rep")) $("#vbp-prov-rep").onclick = () => openVbpProvModal();
   if ($("#rep-exp-xlsx")) $("#rep-exp-xlsx").onclick = () => {
     if (typeof XLSX === "undefined") { toast("Excel 组件未加载"); return; }
     const unit = isAmt ? "K" : "件";
     const head = [dimDefs[r.dim].name, ...periods.flatMap(p => [p.label + " 预估" + unit, p.label + " AOP" + unit, p.label + " 去年同期" + unit, p.label + " 达成率", p.label + " 增长率"])];
     const P = v => v == null ? null : Math.round(v * 1000) / 10 + "%";
+    const KV = v => isAmt ? Math.round(v / 100) / 10 : Math.round(v * 10) / 10; /* ★ 金额:元→千元K;数量:原值1位 */
     const aoa = [["管理报表", S.cfg.cycleLabel || "", "口径", isAmt ? "金额K" : "数量件", "数据来源", rawOnly ? "代表原始" : "管理调整后", "导出时间", new Date().toLocaleString("zh-CN")], head];
-    const _pushRow = o => aoa.push([o.dim, ...periods.flatMap(p => { const c = calc(o, p.mKey); return [Math.round(c.fy * 10) / 10, Math.round(c.aop * 10) / 10, Math.round(c.ly * 10) / 10, P(c.ach), P(c.gr)]; })]);
+    const _pushRow = o => aoa.push([o.dim, ...periods.flatMap(p => { const c = calc(o, p.mKey); return [KV(c.fy), KV(c.aop), KV(c.ly), P(c.ach), P(c.gr)]; })]);
     if (r.dim === "grp") {
       /* ★ 产品维度:按类别分组导出,每类末尾插「▦ 类别 小计」行 — 与界面表格同一套逻辑(groupKeysByCat + aggMonthRows) */
       for (const gc of groupKeysByCat(rows, o => o.dim)) {
         for (const o of gc.keys) _pushRow(o);
         const agg = aggMonthRows(gc.keys);
-        aoa.push(["▦ " + gc.cat + " 小计", ...periods.flatMap(p => { const c = calc(agg, p.mKey); return [Math.round(c.fy * 10) / 10, Math.round(c.aop * 10) / 10, Math.round(c.ly * 10) / 10, P(c.ach), P(c.gr)]; })]);
+        aoa.push(["▦ " + gc.cat + " 小计", ...periods.flatMap(p => { const c = calc(agg, p.mKey); return [KV(c.fy), KV(c.aop), KV(c.ly), P(c.ach), P(c.gr)]; })]);
       }
     } else {
       for (const o of rows) _pushRow(o);
     }
-    aoa.push(["合计", ...periods.flatMap(p => { const c = calc(tot, p.mKey); return [Math.round(c.fy * 10) / 10, Math.round(c.aop * 10) / 10, Math.round(c.ly * 10) / 10, P(c.ach), P(c.gr)]; })]);
+    aoa.push(["合计", ...periods.flatMap(p => { const c = calc(tot, p.mKey); return [KV(c.fy), KV(c.aop), KV(c.ly), P(c.ach), P(c.gr)]; })]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "管理报表-" + dimDefs[r.dim].name.slice(0, 6));
     XLSX.writeFile(wb, "管理报表_" + new Date().toISOString().slice(0, 10) + ".xlsx");
@@ -5391,6 +5508,7 @@ function renderAdmin() {
     '</div>' +
     '<div class="field" style="margin-bottom:10px"><label>RSM 可见范围</label><div class="seg" style="display:inline-flex"><button data-rs="all" class="' + (!cfg || cfg.rsmScope !== "own" ? "on" : "") + '">全部(所有大区)</button><button data-rs="own" class="' + (cfg && cfg.rsmScope === "own" ? "on" : "") + '">仅自己大区</button></div></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:4px 0 0">说明:<b>代表必须输入本人登录密码</b>,未设密码的代表无法进入(密码加密保存,无法回看,忘记只能重置);DSM/RSM 先用个人密码,未设则用通用口令。重置/清除密码后,对应人员已记住的身份会自动失效,需重新登录。密码以加密哈希形式保存在本机;若团队多机使用,改完密码后请通过「导出数据包」经共享盘分发给团队,对方导入后生效。</p>' +
+    '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px"><b style="font-size:13px">💬 用户反馈</b> <span class="hint">全员可通过右下角「💬 反馈」按钮提交建议/Bug/数据问题</span><div style="margin-top:6px"><button class="btn sm pri" id="btn-fb-list">查看反馈列表</button></div></div>' +
     '<div style="border-top:1px dashed var(--line);margin-top:12px;padding-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="ad-clearmgr">🧹 清除管理调整数据</button><button class="btn sm danger" id="ad-clear">🗑 清空全部数据</button></div>' +
     '<p style="color:var(--mute);font-size:12px;margin:6px 0 0">「清除管理调整」只移除 DSM/RSM/管理员的橙色调整,可按 人员 / 产品组 / 省份 选择性清除,代表原始提交保留;「清空全部数据」则删除所有数据。</p></div></div>';
   h += "</div>";
@@ -5564,6 +5682,7 @@ function renderAdmin() {
     renderAdmin(); toast("RSM 可见范围: " + (b.dataset.rs === "own" ? "仅自己大区" : "全部大区"));
   });
   $("#ad-clear").onclick = openClearAll;
+  if ($("#btn-fb-list")) $("#btn-fb-list").onclick = openFbList;
   if ($("#ad-clearmgr")) $("#ad-clearmgr").onclick = openClearMgr;
   /* ★ Supabase 配置绑定 */
   if ($("#sb-save")) $("#sb-save").onclick = () => {
@@ -5884,7 +6003,7 @@ async function exportPinRoster() {
     XLSX.utils.book_append_sheet(wb, ws, "代表密码名册");
     XLSX.writeFile(wb, "代表密码名册_" + stamp() + ".xlsx");
   }
-  toast("名册已导出 — 按 DSM 拆分分发给团队即可"); shareDriveHint();
+  toast("名册已导出 — 按 DSM 拆分分发给团队即可");
 }
 
 /* =================== 修改密码 =================== */
@@ -7326,10 +7445,45 @@ function renderFill(){
    性能优化保留在 bindFill 的「事件委托」上(不再为数千个下拉/输入逐个绑定事件),已能明显减少载入开销;
    若全量行数仍偏慢,后续可改用更稳妥的分页方案。 */
 function setupFillVirtual(rows, cols, savedScrollTop){
+  /* ★ 分页渲染:管理员全量(数千行×多个下拉)一次性铺 DOM 是卡顿主因。
+     首屏只渲染 CHUNK 行,底部「显示更多 / 全部显示」按需展开;筛选/排序/KPI/看板仍按全量数据计算,不受影响。
+     曾深度滚动(savedScrollTop>0)或本次会话点过「全部显示」时,按需扩大渲染量以保持原体验。 */
   const tbody = $("#fill-tbody");
   if (!tbody || !rows.length) return;
   const rowHtml = r => { let s = '<tr data-key="'+esc(r.key)+'">'; for (const c of cols) s += c.td(r); return s + '</tr>'; };
-  tbody.innerHTML = rows.map(rowHtml).join("");
+  const CHUNK = 400, EST_H = 34;
+  let shown = rows.length;
+  if (!S._fillShowAll && rows.length > CHUNK + 100){
+    shown = CHUNK;
+    if (savedScrollTop > 0) shown = Math.min(rows.length, Math.max(shown, Math.ceil(savedScrollTop / EST_H) + CHUNK));
+  }
+  tbody.innerHTML = rows.slice(0, shown).map(rowHtml).join("");
+  const colN = cols.length;
+  const mkMoreRow = () => {
+    if (shown >= rows.length) return "";
+    return '<tr id="fill-more-row"><td class="l" colspan="'+colN+'" style="text-align:center;padding:10px;background:var(--blue-soft,#16233a)">'+
+      '<button class="btn sm pri" id="fill-more-btn">⬇ 显示更多 '+Math.min(CHUNK, rows.length - shown)+' 行</button> '+
+      '<button class="btn sm" id="fill-all-btn">全部显示(共 '+rows.length.toLocaleString()+' 行)</button>'+
+      '<span class="hint" style="margin-left:10px">已显示 '+shown.toLocaleString()+' / '+rows.length.toLocaleString()+' 行 · 汇总与看板始终按全量计算</span></td></tr>';
+  };
+  tbody.insertAdjacentHTML("beforeend", mkMoreRow());
+  const bindMore = () => {
+    const mb = $("#fill-more-btn"), ab = $("#fill-all-btn");
+    if (mb) mb.onclick = () => {
+      const next = rows.slice(shown, shown + CHUNK).map(rowHtml).join("");
+      shown = Math.min(rows.length, shown + CHUNK);
+      const mr = $("#fill-more-row"); if (mr) mr.remove();
+      tbody.insertAdjacentHTML("beforeend", next + mkMoreRow());
+      bindMore();
+    };
+    if (ab) ab.onclick = () => {
+      S._fillShowAll = true;
+      const mr = $("#fill-more-row"); if (mr) mr.remove();
+      tbody.insertAdjacentHTML("beforeend", rows.slice(shown).map(rowHtml).join(""));
+      shown = rows.length;
+    };
+  };
+  bindMore();
   const twrap = tbody.closest(".twrap");
   if (twrap) requestAnimationFrame(() => { twrap.scrollTop = savedScrollTop; });
 }
@@ -9148,7 +9302,6 @@ async function submitAll(){
     toast("✅ 已提交鞘入院跟进 + 月度预估,正在导出 Excel…");
     rerender(); renderCtx();
     try { exportBothXlsx(); } catch(e){ console.error("export both failed:",e); }
-    shareDriveHint();
   } catch(e){ toast("⚠ 提交失败:"+(e.message||e)); }
   finally { _submittingAll=false; setBtns("📤 提交鞘入院跟进+预估到共享盘", false); }
 }
@@ -9551,6 +9704,34 @@ function orgMismatch(r){
   if(o.dsm && norm(o.dsm)!==norm(r.dsm)) bad.push("DSM应为"+o.dsm);
   if(o.rsm && norm(o.rsm)!==norm(r.rsm)) bad.push("RSM应为"+o.rsm);
   return bad.length ? bad.join(" / ") : "";
+}
+/* ★ 组织架构同步:把光纤名录的 Rep/DSM/RSM 修正为与「预估收集」主模块一致。
+   匹配规则:①同名(规范化) ②主模块新岗名"X(原Y岗)"匹配老名Y(换手) ③唯一包含关系;
+   多候选/无候选的行保留原值并列入报告。DSM/RSM 一律以主模块名册为准刷新。 */
+function fbrOrgFix(rows){
+  let roster=[]; try{ roster=(typeof window.__fcOrgRoster==="function")?window.__fcOrgRoster():[]; }catch(e){}
+  if(!roster.length) return { ok:false, msg:"主模块名册不可用(请先加载预估收集数据)" };
+  const byCanon=new Map(), bySuffix=new Map();
+  for(const r of roster){
+    byCanon.set(norm(r.rep), r);
+    const m=String(r.rep).match(/^(.+?)[(（]原(.+?)岗[)）]$/);
+    if(m) bySuffix.set(norm(m[2]), r);
+  }
+  let renamed=0, refreshed=0; const renameLog=new Map(), unmatched=new Map();
+  for(const row of rows){
+    const c=norm(row.rep);
+    let hit=byCanon.get(c)||bySuffix.get(c);
+    if(!hit&&c){
+      const cands=roster.filter(r=>{ const rc=norm(r.rep); return rc.includes(c)||c.includes(rc); });
+      if(cands.length===1) hit=cands[0];
+    }
+    if(hit){
+      if(norm(row.rep)!==norm(hit.rep)){ const lk=row.rep+" → "+hit.rep; renameLog.set(lk,(renameLog.get(lk)||0)+1); row.rep=hit.rep; renamed++; }
+      const nd=hit.dsm||row.dsm||"", nr=hit.rsm||row.rsm||"";
+      if(norm(row.dsm)!==norm(nd)||norm(row.rsm)!==norm(nr)){ row.dsm=nd; row.rsm=nr; refreshed++; }
+    } else if(c){ unmatched.set(row.rep,(unmatched.get(row.rep)||0)+1); }
+  }
+  return { ok:true, renamed, refreshed, renameLog:[...renameLog.entries()], unmatched:[...unmatched.entries()] };
 }
 
 /* ---------- 行计算 ---------- */
@@ -10005,6 +10186,7 @@ function renderAdmin(){
   let h='<div class="card"><div class="card-h"><b>⚙️ 光纤Tracking · 管理后台</b></div><div class="card-b">';
   h+='<div class="statgrid" style="padding:12px 16px">'+kpi("总医院数",S.base.length)+kpi("北区",n)+kpi("南区",s)+kpi("已选策略",Object.values(S.fill).filter(f=>f.strat).length)+kpi("数据月份",(S.cfg.dataMonth||"–")+"月")+kpi("月度快照",S.snaps.length)+'</div>';
   h+='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px">'+
+    '<button class="btn" id="f-orgsync" title="把光纤名录的 Rep/DSM/RSM 名称修正为与预估收集主模块一致(换手改名自动映射),保证代表/经理登录后能看到自己的光纤医院">🔗 同步组织架构(与预估模块一致)</button>'+
     '<button class="btn pri" id="fimp-n">📥 导入北区 Excel</button>'+
     '<button class="btn pri" id="fimp-s">📥 导入南区 Excel</button>'+
     '<button class="btn" id="fsnap">📌 保存当前为 '+(S.cfg.dataMonth||"?")+'月 快照</button>'+
@@ -10019,6 +10201,17 @@ function renderAdmin(){
   h+=S.snaps.length?'<table class="dt"><thead><tr><th class="l">快照</th><th class="l">保存时间</th><th>记录数</th><th></th></tr></thead><tbody>'+S.snaps.map(sn=>'<tr><td class="l"><b>'+esc(sn.label)+'</b></td><td class="l" style="color:var(--mute)">'+new Date(sn.ts).toLocaleString("zh-CN")+'</td><td class="num">'+Object.keys(sn.data||{}).length+'</td><td><button class="btn sm danger" data-delsnap="'+sn.id+'">删除</button></td></tr>').join("")+'</tbody></table>':'<p class="hint">还没有快照。每月初把上月状态「保存为快照」,填写页/看板的「vs上月」即可自动对比。</p>';
   h+='</div></div>';
   host.innerHTML=h;
+  if($("#f-orgsync")) $("#f-orgsync").onclick=async()=>{
+    if(!S.base.length){ toast("还没有光纤数据"); return; }
+    const r=fbrOrgFix(S.base);
+    if(!r.ok){ toast("⚠ "+r.msg); return; }
+    if(r.renamed||r.refreshed){ await Store.set("fbr-base",{rows:S.base}); }
+    let b="<p>代表改名 <b>"+r.renamed+"</b> 行 · 经理/大区刷新 <b>"+r.refreshed+"</b> 行"+(r.renamed||r.refreshed?" — 已保存到云端":" — 无需改动")+"</p>";
+    if(r.renameLog.length) b+="<p style='margin-top:6px'><b>改名对照:</b><br>"+r.renameLog.map(x=>esc(x[0])+"("+x[1]+"行)").join("<br>")+"</p>";
+    if(r.unmatched.length) b+="<p style='margin-top:6px;color:#B45309'><b>未能匹配(保留原值,请人工核对):</b><br>"+r.unmatched.map(x=>esc(x[0])+"("+x[1]+"行)").join("、")+"</p>";
+    openModal("组织架构同步结果", b, '<button class="btn pri" onclick="document.querySelector(\'#fbr-app #fmask\').classList.remove(\'show\')">知道了</button>');
+    rerender();
+  };
   $("#fimp-n").onclick=()=>$("#ffile-n").click();
   $("#fimp-s").onclick=()=>$("#ffile-s").click();
   $("#fsnap").onclick=async()=>{
@@ -10110,8 +10303,10 @@ function importXlsx(file, region){
       }
       S.cfg.dataMonth=Math.max(S.cfg.dataMonth||0, month);
       S.cfg.importedAt=S.cfg.importedAt||{}; S.cfg.importedAt[region]=Date.now();
+      /* ★ 导入后自动把组织架构规范成与预估收集一致(防止Excel里的旧名字每月覆盖回来) */
+      let _org=null; try{ _org=fbrOrgFix(S.base); }catch(_e){}
       await Store.set("fbr-base",{rows:S.base}); await Store.set("fbr-fill",S.fill); await Store.set("fbr-cfg",S.cfg);
-      toast("✅ "+region+" 导入完成:"+sheetName+" · 更新"+upd+"行 · 新增"+added+"行"+(seeded?" · 吸收已填"+seeded+"行":""));
+      toast("✅ "+region+" 导入完成:"+sheetName+" · 更新"+upd+"行 · 新增"+added+"行"+(seeded?" · 吸收已填"+seeded+"行":"")+(_org&&_org.ok&&(_org.renamed||_org.refreshed)?" · 架构同步"+(_org.renamed+_org.refreshed)+"行":""));
       rerender(); if(typeof window.__fcRefreshFbrTab==="function") try{window.__fcRefreshFbrTab()}catch(_e){}
     }catch(err){ console.error(err); toast("⚠ 导入失败:"+err.message); }
   };
