@@ -1643,6 +1643,7 @@ async function openFbList(){
     b.id = "fb-fab"; b.textContent = "💬 反馈"; b.title = "提交建议 / Bug / 数据问题";
     b.style.cssText = "position:fixed;right:14px;bottom:70px;z-index:9998;background:#2054E0;color:#fff;border:0;border-radius:999px;padding:9px 15px;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(32,84,224,.35);cursor:pointer";
     b.onclick = openFeedback;
+    b.style.display = S.me ? "" : "none";   /* ★安全:未登录隐藏反馈入口 */
     document.body.appendChild(b);
   } catch(e){}
 })();
@@ -2046,8 +2047,11 @@ function reviewerList(){
 function reviewerProductsOf(name){ const r = reviewerList().find(x => x.name === name); return r ? r.products : []; }
 function isReviewerMe(){ return !!(S.me && S.me.role === "reviewer"); }
 
+function _needIdentityHtml(){ return '<div class="card"><div class="empty" style="padding:40px 22px"><b style="font-size:15px">🔒 请先选择身份登录</b><div style="margin-top:6px;color:var(--ink2)">点击右上角「选择身份」，用<b>本人姓名和登录密码</b>进入。未登录状态下<b>看不到、也无法修改</b>任何数据。忘记密码请联系管理员重置。</div></div></div>'; }
+function requireIdentity(host){ if (S.me) return false; if (host) host.innerHTML = _needIdentityHtml(); if (!S.gateOpen) { try { renderGate(); } catch(e){} } return true; }
 function inScope(e) {
-  const m = S.me; if (!m || m.role === "admin") return true;
+  const m = S.me; if (!m) return false;   /* ★安全:未登录 → 看不到任何数据 */
+  if (m.role === "admin") return true;
   if (m.role === "rep") return e.rep === m.name;
   if (m.role === "dsm") return e.dsm === m.name;
   if (m.role === "rsm") return (S.cfg && S.cfg.rsmScope === "own") ? e.rsm === m.name : true;
@@ -2285,6 +2289,7 @@ function accMonthsLabel(msArr) { return (msArr && msArr.length) ? msArr.map(i =>
 const _saveTimers = new Map();
 function saveRepDoc(rep) {
   if (!rep) return;
+  if (!S.me) return;   /* ★安全:未登录禁止写入 */
   S._dirtyReps.add(rep);
   clearTimeout(_saveTimers.get(rep));
   _saveTimers.set(rep, setTimeout(async () => {
@@ -2300,6 +2305,7 @@ function saveRepDoc(rep) {
 let flushDirtyReps = async function (showState) {
   for (const t of _saveTimers.values()) clearTimeout(t);
   _saveTimers.clear();
+  if (!S.me) { if (S._dirtyReps) S._dirtyReps.clear(); return; }   /* ★安全:未登录不落盘 */
   if (!S._dirtyReps || S._dirtyReps.size === 0) return;
   for (const rep of Array.from(S._dirtyReps)) {
     const doc = S.fcs.get(rep); if (!doc) { S._dirtyReps.delete(rep); continue; }
@@ -2332,7 +2338,7 @@ function ensureCell(rep, key) {
    DSM/RSM/管理员在填写页的修改写入这里,代表的原始提交(fc-f-*)永不被覆盖。
    显示规则: 代表身份 → 看自己原始数;管理身份 → 看"覆盖值 ?? 代表原值"的最终数。
    某格覆盖值清空 = 撤销该格调整,回落到代表原值。 */
-function isMgrView() { return !S.me || S.me.role !== "rep"; }
+function isMgrView() { return !!S.me && S.me.role !== "rep"; }   /* ★安全:未登录不再是管理视图 */
 /* 编辑某行是否写入「管理调整层」:
    管理视图(DSM/RSM/管理员)下,改他人代表的行 → 调整层;
    但 player-coach 型 DSM/RSM 改「自己辖区」(该行代表 = 本人姓名)的行 → 视为本人正式提交,写入其代表底稿。 */
@@ -2363,6 +2369,7 @@ function saveMgrDoc() {
 }
 async function flushMgrDoc() {
   clearTimeout(_mgrTimer); _mgrTimer = null;
+  if (!S.me) { S._mgrDirty = false; return; }   /* ★安全:未登录禁止写管理调整 */
   if (!S._mgrDirty || !S.mgr) return;
   S.mgr.updatedAt = Date.now();
   const ok = await Store.set("fc-mgr", S.mgr);
@@ -2407,6 +2414,7 @@ function renderCtx() {
    ===================================================================== */
 async function renderFill() {
   const host = $("#tab-fill");
+  if (requireIdentity(host)) return;   /* ★安全:未登录零填写 */
   if (!S.master || !S.cfg) {
     host.innerHTML = '<div class="card"><div class="empty"><b>还没有底表数据</b>管理员请先到「管理后台」导入系统导出的 AOP/Actual 明细文件,导入后各代表即可在此填写。</div></div>';
     return;
@@ -3399,6 +3407,7 @@ function repSubmitInfo(doc) {
 }
 function renderProgress() {
   const host = $("#tab-progress");
+  if (requireIdentity(host)) return;   /* ★安全 */
   if (!S.master || !S.cfg) {
     host.innerHTML = '<div class="card"><div class="empty"><b>还没有数据</b>请先在「管理后台」导入系统导出文件。</div></div>';
     return;
@@ -3528,6 +3537,7 @@ function exportUnsubXlsx(repStatus) {
    ===================================================================== */
 async function renderDash() {
   const host = $("#tab-dash");
+  if (requireIdentity(host)) return;   /* ★安全 */
   if (!S.master || !S.cfg) { host.innerHTML = '<div class="card"><div class="empty"><b>还没有数据</b>请先在「管理后台」导入系统导出文件。</div></div>'; return; }
   const d = S.dash;
   const vs = (S.cfg.versions || []);
@@ -5273,6 +5283,7 @@ function openClearMgr() {
    ===================================================================== */
 async function renderReport() {
   const host = $("#tab-report");
+  if (requireIdentity(host)) return;   /* ★安全 */
   if (!S.master || !S.cfg) { host.innerHTML = '<div class="card"><div class="empty"><b>还没有数据</b>请先在「管理后台」导入系统导出文件。</div></div>'; return; }
   const r = S.report;
   // YTD 默认截止月: 取最大关账月, 无则 12 (与看板"任意选 YTD 月份"一致, 用户可改)
@@ -6416,6 +6427,7 @@ function applyMe() {
   if (btn) btn.textContent = "👤 " + (S.me ? (S.me.role === "admin" ? "管理员" : S.me.name) : "选择身份");
   const btnChgPwd = $("#btn-chgpwd");
   if (btnChgPwd) btnChgPwd.style.display = S.me ? "" : "none";
+  { const fab = document.getElementById("fb-fab"); if (fab) fab.style.display = S.me ? "" : "none"; }   /* ★安全:反馈入口随登录态 */
   if (window.ZSR) window.ZSR.setIdentity(typeof window.__fcZsrMe === "function" ? window.__fcZsrMe() : null);
   updateZsrTabVis();
   if (window.FBR) window.FBR.setIdentity(typeof window.__fcZsrMe === "function" ? window.__fcZsrMe() : null);   /* 光纤模块复用同一身份映射 */
@@ -6608,6 +6620,7 @@ async function renderGate() {
 
 /* =================== 入口 =================== */
 function rerender() {
+  if (!S.me && !S.gateOpen) { try { renderGate(); } catch(e){} }   /* ★安全:未登录始终回到身份选择 */
   const bu = S.master && S.master.meta && S.master.meta.bu;
   $("#bu-tag").textContent = (bu ? bu + " · " : "") + "月度滚动预估";
   renderCtx();
@@ -7225,15 +7238,15 @@ function zsrSampleGuard(what){ /* 🛡 示例数据保险栓:处于示例状态�
   return false;
 }
 async function saveBase(){ if (zsrSampleGuard("医院名录")) return false; const ok = await Store.set("zsr-base", { rows:S.base, meta:S.baseMeta }); warnIfCloudFailed(ok); return ok; }
-async function saveFill(){ if (zsrSampleGuard("入院填报")) return; await Store.set("zsr-fill", S.fill); }       /* 在线/共享写入(管理员导入、提交时用) */
+async function saveFill(){ if (!S.me) return; if (zsrSampleGuard("入院填报")) return; await Store.set("zsr-fill", S.fill); }   /* ★安全:未登录禁写 */       /* 在线/共享写入(管理员导入、提交时用) */
 function saveFillDraft(){ Store.draftSet("zsr-fill", S.fill); }          /* 填写编辑暂存到本机草稿 */
 async function saveVersions(){ await Store.set("zsr-versions", S.versions); }
 async function savePasswords(){ await Store.set("zsr-passwords", S.passwords); }
 
 /* ===== 鞘预估子系统:存储助手 ===== */
 async function saveFcBase(){ if (Store.sbEnabled && S.fcMeta && S.fcMeta.sample){ toast("🛡 当前是示例鞘预估,已阻止写入云端"); return false; } const ok = await Store.set("zsr-fc-base", { rows:S.fcBase, meta:S.fcMeta, cfg:S.fcCfg }); warnIfCloudFailed(ok); return ok; }
-async function saveFcFill(){ if (Store.sbEnabled && S.fcMeta && S.fcMeta.sample){ return; } await Store.set("zsr-fc-fill", S.fcFill); }
-function saveFcDraft(){ Store.draftSet("zsr-fc-fill", S.fcFill); S.fcFillDirty = true; _zFcSeq++; }
+async function saveFcFill(){ if (!S.me) return; if (Store.sbEnabled && S.fcMeta && S.fcMeta.sample){ return; } await Store.set("zsr-fc-fill", S.fcFill); }   /* ★安全:未登录禁写 */
+function saveFcDraft(){ if (!S.me) return; Store.draftSet("zsr-fc-fill", S.fcFill); S.fcFillDirty = true; _zFcSeq++; }   /* ★安全:未登录禁写 */
 /* ★ BI一次上传双模块:主模块导入主数据后调用,把文件里鞘线(ZSR测压鞘/Anrei负压鞘)的医院级 实际/指标 写入鞘预估基线。
    规则:已关账月的实际=以文件整月替换(文件无值即0);指标=只替换「文件中该月鞘指标总额>0」的月份(保护鞘模块自有的其他月份指标);
    基线没有的医院行自动补建;鞘模块关账月与主模块同步;基线为空/示例时拒绝。单位:unitMul=文件→元 的倍率,写入时再 ÷1000 转千元K。 */
@@ -10411,7 +10424,7 @@ function renderFill(){
 }
 function kpi(t,v,sub){ return '<div class="stat"><small>'+t+'</small><b class="num">'+v+'</b>'+(sub?'<div class="sub">'+sub+'</div>':'')+'</div>'; }   /* 与预估界面 KPI 方块同款(.stat 全局样式) */
 let _saveT=null;
-function saveFill(){ clearTimeout(_saveT); _saveT=setTimeout(async()=>{ const ok=await Store.set("fbr-fill",S.fill); toast(ok?"✓ 已保存":"⚠ 保存失败"); },600); }
+function saveFill(){ if(!S.me) return; clearTimeout(_saveT); _saveT=setTimeout(async()=>{ const ok=await Store.set("fbr-fill",S.fill); toast(ok?"✓ 已保存":"⚠ 保存失败"); },600); }   /* ★安全:未登录禁写 */
 function setF(code,fid,val){
   if(!S.fill[code]) S.fill[code]={};
   S.fill[code][fid]=val; S.fill[code].ut=Date.now(); S.fill[code].ub=scopeLabel();
@@ -10444,7 +10457,7 @@ function bindFillEvents(){
     st.onwheel=e=>{ e.preventDefault(); fw.scrollLeft+=(e.deltaX||e.deltaY); };
     if(window.ResizeObserver){ const ro=new ResizeObserver(paint); ro.observe(fw); const tbl=$("#ftable"); if(tbl) ro.observe(tbl); }
   }
-  const sv=$("#f-save"); if(sv) sv.onclick=async()=>{ clearTimeout(_saveT); const ok=await Store.set("fbr-fill",S.fill); toast(ok?"✓ 已保存":"⚠ 保存失败"); };
+  const sv=$("#f-save"); if(sv) sv.onclick=async()=>{ if(!S.me){ toast("请先选择身份"); return; } clearTimeout(_saveT); const ok=await Store.set("fbr-fill",S.fill); toast(ok?"✓ 已保存":"⚠ 保存失败"); };
   const ex=$("#f-exp"); if(ex) ex.onclick=()=>{ exportXlsx(S._lastList||[]); toast("已导出 Excel 明细(无需上传)"); };
   const tb=$("#ftable"); if(!tb) return;
   tb.addEventListener("change",ev=>{
