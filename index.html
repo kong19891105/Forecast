@@ -2077,6 +2077,9 @@ const VBP_EXEC_PROVS = new Set(["江西省","广西壮族自治区","湖南省",
 const VBP_NVBP_PROVS = new Set(["上海市","山东省","北京市","广东省"]);
 function vbpHideOn(){ try { return localStorage.getItem("fc-vbphide") === "1"; } catch (e) { return false; } }
 function setVbpHide(on){ try { localStorage.setItem("fc-vbphide", on ? "1" : "0"); } catch (e) {} }
+/* ★ 第二开关(独立):不看支架未执行VBP省份的 7-12「预估」(只遮开口月预估显示,关账后的实际不受影响;省份范围与指标开关共用) */
+function vbpHideFcOn(){ try { return localStorage.getItem("fc-vbphide-fc") === "1"; } catch (e) { return false; } }
+function setVbpHideFc(on){ try { localStorage.setItem("fc-vbphide-fc", on ? "1" : "0"); } catch (e) {} }
 /* 自定义隐藏省份集合;未自定义(null)时 = 默认口径(10个已执行省之外的全部支架省份) */
 function vbpCustomProvs(){ try { const s = localStorage.getItem("fc-vbphide-provs"); return s ? new Set(JSON.parse(s)) : null; } catch (e) { return null; } }
 function setVbpProvs(arr){ try { if (arr == null) localStorage.removeItem("fc-vbphide-provs"); else localStorage.setItem("fc-vbphide-provs", JSON.stringify(arr)); } catch (e) {} }
@@ -2084,16 +2087,26 @@ function vbpAllProvs(){ const s = new Set(); for (const r of S.idx.values()) if 
 function vbpHiddenSet(){ const c = vbpCustomProvs(); if (c) return c; return new Set(vbpAllProvs().filter(p => !VBP_EXEC_PROVS.has(p) && !VBP_NVBP_PROVS.has(p))); }
 function vbpIsHidden(prov){ return vbpHiddenSet().has(prov); }
 function applyVbpHide(list){
-  if (!vbpHideOn()) return list;
+  const hA = vbpHideOn(), hF = vbpHideFcOn();   /* hA=遮指标 hF=遮预估,两开关独立,可任意组合 */
+  if (!hA && !hF) return list;
   const hideSet = vbpHiddenSet();
   return list.map(e => {
-    if ((e.grp === "支架" || e.grp === "支架-NVBP省份") && hideSet.has(e.prov) && e.row && e.row.aopA){
+    if (!((e.grp === "支架" || e.grp === "支架-NVBP省份") && hideSet.has(e.prov))) return e;
+    let e2 = e;
+    if (hA && e.row && e.row.aopA){
       const row2 = Object.assign({}, e.row, { aopA: e.row.aopA.map((v, i) => i >= 6 ? 0 : v), aopQ: (e.row.aopQ || []).map((v, i) => i >= 6 ? 0 : v) });
-      return Object.assign({}, e, { row: row2,
+      e2 = Object.assign({}, e2, { row: row2,
         aop: row2.aopA.reduce((x, y) => x + (y || 0), 0),
         aopQ: row2.aopQ.reduce((x, y) => x + (y || 0), 0) });
     }
-    return e;
+    if (hF && e.m){
+      /* 只清 7-12 月中的「开口月」预估显示;已关账月是实际销量,不遮 */
+      const m2 = e.m.map((c, i) => (i >= 6 && c && !c.act) ? Object.assign({}, c, { a: 0, q: 0 }) : c);
+      let fy = 0, fyq = 0;
+      for (const c of m2){ if (c){ fy += c.a || 0; fyq += c.q || 0; } }
+      e2 = Object.assign({}, e2, { m: m2, fy: fy, fyq: fyq });
+    }
+    return e2;
   });
 }
 function dashReportEntries(rawOnly) { return applyVbpHide(buildEntries(rawOnly).concat(zsrMergedEntries())); }
@@ -2101,7 +2114,7 @@ function dashReportEntries(rawOnly) { return applyVbpHide(buildEntries(rawOnly).
 function openVbpProvModal(){
   const provs = vbpAllProvs();
   const cur = vbpHiddenSet();
-  let b = '<p style="font-size:13px;color:var(--ink2);line-height:1.7">勾选的省份,其<b>支架类 7-12月指标</b>在看板/报表/导出中按 0 处理(云端数据不变)。默认隐藏=除「已执行VBP的10省(绿标)」和「NVBP省份(蓝标:上海/山东/北京/广东)」之外的全部——这两类省份的指标为真,默认不隐藏。</p>';
+  let b = '<p style="font-size:13px;color:var(--ink2);line-height:1.7">勾选的省份为<b>两个开关共用</b>的名单:🚫开关遮其<b>支架类 7-12月指标</b>、🙈开关遮其<b>支架类 7-12月预估</b>,在看板/报表/导出中按 0 处理(云端数据不变)。默认隐藏=除「已执行VBP的10省(绿标)」和「NVBP省份(蓝标:上海/山东/北京/广东)」之外的全部——这两类省份的指标为真,默认不隐藏。</p>';
   b += '<div style="margin:8px 0 10px;display:flex;gap:8px"><button class="btn sm" id="vbp-def">恢复默认(执行VBP+NVBP省之外)</button><button class="btn sm" id="vbp-all">全选</button><button class="btn sm" id="vbp-none">全不选</button></div>';
   b += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:320px;overflow:auto">';
   for (const p of provs){
@@ -3607,7 +3620,7 @@ async function renderDash() {
     '</span><span class="cg"><i class="cg-l">对比</i>' +
     '<select class="ctrl" id="cmp-sel"><option value="">不对比版本</option>' + vs.map(v => '<option value="' + v.id + '"' + (d.cmpId === v.id ? " selected" : "") + ">对比: " + esc(v.label) + "</option>").join("") + "</select>" +
     '</span>' +
-    '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px" title="已执行支架VBP(指标为真)的10省:江西/广西/湖南/贵州/内蒙古/河南/重庆/辽宁/陕西/吉林。其余省份的支架类7-12月指标为占位值,勾选后看板/报表及导出按0处理;云端数据不变。点「选省份」可自定义隐藏哪些省。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-dash" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>' +
+    '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px" title="已执行支架VBP(指标为真)的10省:江西/广西/湖南/贵州/内蒙古/河南/重庆/辽宁/陕西/吉林。其余省份的支架类7-12月指标为占位值,两个开关独立:🚫遮7-12指标、🙈遮7-12预估(均只影响显示与导出,云端数据与代表填写不变;这些月份日后关账的实际销量不受影响)。省份范围两开关共用,点「选省份」自定义。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><span style="width:1px;height:16px;background:#E8C97F"></span><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hidefc-dash" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideFcOn() ? " checked" : "") + '> 🙈 不看其7-12预估</label><button class="btn sm" id="vbp-prov-dash" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>' +
     "</div>";
 
   /* 维度下钻筛选器行 (当前维度在最前, 标记为「主」) */
@@ -3884,6 +3897,7 @@ async function renderDash() {
   $("#dim-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.dim = b.dataset.d; d.open.clear(); renderDash(); } };
   $("#met-seg").onclick = e => { const b = e.target.closest("button"); if (b) { d.metric = b.dataset.m; renderDash(); } };
   if ($("#vbp-hide-dash")) $("#vbp-hide-dash").onchange = e => { setVbpHide(e.target.checked); renderDash(); };
+  if ($("#vbp-hidefc-dash")) $("#vbp-hidefc-dash").onchange = e => { setVbpHideFc(e.target.checked); renderDash(); };
   if ($("#vbp-prov-dash")) $("#vbp-prov-dash").onclick = () => openVbpProvModal();
   $("#dash-period-seg").onclick = e => { const b = e.target.closest("button"); if (b && b.dataset.p) { if (b.dataset.p === "YTD") { if (!d.period.startsWith("YTD")) d.period = "YTD-" + ytdCutMonth(); } else { d.period = b.dataset.p; } renderDash(); } };
   if ($("#dash-ytd")) $("#dash-ytd").onchange = e => { d.period = "YTD-" + e.target.value; renderDash(); };
@@ -5427,7 +5441,7 @@ async function renderReport() {
     '<option value=""' + (!r.cmpId ? " selected" : "") + '>不对比</option>' +
     vsAll.slice().reverse().map(v => '<option value="' + esc(v.id) + '"' + (r.cmpId === v.id ? " selected" : "") + '>' + esc(v.label || v.id) + (v.savedAt ? " · " + dt(v.savedAt) : "") + '</option>').join("") +
     '</select></div>';
-  h += '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px;align-self:flex-end" title="已执行支架VBP的10省指标为真,其余省份支架7-12月指标为占位值;勾选后按0处理,与看板联动,云端数据不变。点「选省份」自定义。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-rep" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><button class="btn sm" id="vbp-prov-rep" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>';
+  h += '<span style="display:inline-flex;align-items:center;gap:7px;border:1.5px solid #F0B429;background:rgba(240,180,41,.14);border-radius:10px;padding:5px 12px;align-self:flex-end" title="已执行支架VBP的10省指标为真,其余省份支架7-12月指标为占位值;两个开关独立(🚫遮指标/🙈遮预估),与看板联动,只影响显示与导出,云端数据不变。省份范围共用,点「选省份」自定义。"><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hide-rep" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideOn() ? " checked" : "") + '> 🚫 不看支架未执行VBP省份的7-12指标</label><span style="width:1px;height:16px;background:#E8C97F"></span><label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-weight:700;color:#B45309;font-size:13px"><input type="checkbox" id="vbp-hidefc-rep" style="width:15px;height:15px;accent-color:#B45309"' + (vbpHideFcOn() ? " checked" : "") + '> 🙈 不看其7-12预估</label><button class="btn sm" id="vbp-prov-rep" style="border-color:#F0B429;color:#B45309;font-weight:700">选省份(' + vbpHiddenSet().size + ')</button></span>';
   h += '<button class="btn pri sm" id="rep-exp-xlsx" style="margin-left:auto;align-self:flex-end">\u2b07 导出 Excel</button>';
   h += '</div>';
   h += '<div class="hint" style="margin-top:10px;line-height:1.7">范围:' + esc(scopeLabel()) +
@@ -5605,6 +5619,7 @@ async function renderReport() {
   document.addEventListener("click", S._reportClickHandler);
   if ($("#rep-drill-clear")) $("#rep-drill-clear").onclick = () => { r.drillFilters = {}; renderReport(); };
   if ($("#vbp-hide-rep")) $("#vbp-hide-rep").onchange = e => { setVbpHide(e.target.checked); renderReport(); };
+  if ($("#vbp-hidefc-rep")) $("#vbp-hidefc-rep").onchange = e => { setVbpHideFc(e.target.checked); renderReport(); };
   if ($("#vbp-prov-rep")) $("#vbp-prov-rep").onclick = () => openVbpProvModal();
   if ($("#rep-exp-xlsx")) $("#rep-exp-xlsx").onclick = () => {
     if (typeof XLSX === "undefined") { toast("Excel 组件未加载"); return; }
