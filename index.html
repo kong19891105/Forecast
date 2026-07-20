@@ -4151,6 +4151,25 @@ function exportDashXlsx(rows, entries, ver, verMeta) {
     }
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), "汇总-" + dimDefs[d.dim].name.slice(0, 4));
+  /* ★ 月度指标:行=当前维度值(产品维度含类别小计),列=1-12月指标+全年合计。
+     完全跟随看板当前状态:维度/大区/下钻筛选/搜索/金额数量口径/VBP两开关 —— 所见即所导。 */
+  const aoaM = [["周期", S.cfg.cycleLabel, "口径", isQty ? "数量(件)" : "金额(千元K)", "支架VBP指标遮罩", vbpHideOn() ? "开(所选省份支架7-12月指标按0)" : "关", "导出时间", new Date().toLocaleString("zh-CN")],
+    [dimDefs[d.dim].name, ...MN.map(m => m + "指标 " + U), "FY指标合计 " + U]];
+  const _aopArrOf = r => isQty ? (r.aopQ2 || []) : (r.aopA || []);
+  const _totM = Array(12).fill(0);
+  for (const r of _rowsX) {
+    const _oa = _aopArrOf(r);
+    for (let i = 0; i < 12; i++) _totM[i] += _oa[i] || 0;
+    aoaM.push([r.dim, ...MN.map((m, i) => KV(_oa[i] || 0)), KV(_oa.reduce((s, v) => s + (v || 0), 0))]);
+    const _s2 = _subAt && _subAt.get(r);
+    if (_s2) {
+      const _sm = Array(12).fill(0);
+      for (const m of _s2.mem) { const _oa2 = _aopArrOf(m); for (let i = 0; i < 12; i++) _sm[i] += _oa2[i] || 0; }
+      aoaM.push(["★ " + _s2.cat + " 小计", ...MN.map((m, i) => KV(_sm[i])), KV(_sm.reduce((a, b) => a + b, 0))]);
+    }
+  }
+  aoaM.push(["合计", ...MN.map((m, i) => KV(_totM[i])), KV(_totM.reduce((a, b) => a + b, 0))]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoaM), "月度指标");
   /* 明细 */
   const aoa2 = [["RSM", "DSM", "代表", "省份", "产品组", ...MN.map((m, i) => m + (new Set(S.cfg.actMonths).has(i + 1) ? "Act" : "FCST") + " " + U), "FY预估" + U, "FY AOP " + U, "Ach%", "预估差异K(金额)", "预估准确率%(金额)", "上版FY K(金额)", "ΔFY K(金额)", "FY代表原始K(金额)", "管理调整月数", "备注", "管理备注"]];
   for (const e of entries.slice().sort((a, b) => a.rsm.localeCompare(b.rsm, "zh") || a.rep.localeCompare(b.rep, "zh") || b.fy - a.fy)) {
